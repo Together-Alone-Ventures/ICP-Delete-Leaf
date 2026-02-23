@@ -331,6 +331,7 @@ name = "mktd02"
 version = "0.1.0"
 dependencies = [
  "candid",
+ "ciborium",
  "ic-cdk",
  "ic-stable-structures",
  "serde",

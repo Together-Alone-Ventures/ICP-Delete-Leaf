@@ -6,22 +6,14 @@
 //!
 //! Domain tag: `MKTD02_MANIFEST_V1`
 
-use crate::hashing::{sha256_concat, TAG_MANIFEST};
+use crate::hashing::{hash_with_tag, TAG_MANIFEST};
 use candid::CandidType;
 use serde::{Deserialize, Serialize};
 
-/// Describes a single PII field in the manifest.
-///
-/// The `field_order` determines the canonical ordering for hashing.
-/// Adapters must list fields in ascending `field_order` to ensure
-/// deterministic serialisation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, CandidType)]
 pub struct FieldDescriptor {
-    /// Human-readable field name (e.g., "email", "birthdate").
     pub field_name: String,
-    /// Type descriptor (e.g., "String", "Option<String>", "u64").
     pub field_type: String,
-    /// Canonical ordering position. Must be unique within a manifest.
     pub field_order: u32,
 }
 
@@ -29,14 +21,8 @@ pub struct FieldDescriptor {
 ///
 /// `manifest_hash = SHA-256(MKTD02_MANIFEST_V1 || field_count || field_0 || field_1 || ...)`
 ///
-/// Each field contributes: `field_order (4 bytes BE) || field_name_len (4 bytes BE)
-/// || field_name_bytes || field_type_len (4 bytes BE) || field_type_bytes`
-///
-/// **The input must be sorted by `field_order`.** This function validates
-/// the ordering and panics if fields are out of order or have duplicate
-/// `field_order` values.
+/// **The input must be sorted by `field_order`.** Panics if unsorted or duplicated.
 pub fn compute_manifest_hash(fields: &[FieldDescriptor]) -> [u8; 32] {
-    // Validate ordering
     for window in fields.windows(2) {
         assert!(
             window[0].field_order < window[1].field_order,
@@ -58,7 +44,7 @@ pub fn compute_manifest_hash(fields: &[FieldDescriptor]) -> [u8; 32] {
         field_bytes.extend_from_slice(f.field_type.as_bytes());
     }
 
-    sha256_concat(&[TAG_MANIFEST, &field_count, &field_bytes])
+    hash_with_tag(TAG_MANIFEST, &[&field_count, &field_bytes])
 }
 
 #[cfg(test)]
@@ -67,26 +53,10 @@ mod tests {
 
     fn sample_manifest() -> Vec<FieldDescriptor> {
         vec![
-            FieldDescriptor {
-                field_name: "email".into(),
-                field_type: "String".into(),
-                field_order: 0,
-            },
-            FieldDescriptor {
-                field_name: "birthdate".into(),
-                field_type: "Option<String>".into(),
-                field_order: 1,
-            },
-            FieldDescriptor {
-                field_name: "gender".into(),
-                field_type: "Option<String>".into(),
-                field_order: 2,
-            },
-            FieldDescriptor {
-                field_name: "display_name".into(),
-                field_type: "Option<String>".into(),
-                field_order: 3,
-            },
+            FieldDescriptor { field_name: "email".into(), field_type: "String".into(), field_order: 0 },
+            FieldDescriptor { field_name: "birthdate".into(), field_type: "Option<String>".into(), field_order: 1 },
+            FieldDescriptor { field_name: "gender".into(), field_type: "Option<String>".into(), field_order: 2 },
+            FieldDescriptor { field_name: "display_name".into(), field_type: "Option<String>".into(), field_order: 3 },
         ]
     }
 
@@ -101,15 +71,8 @@ mod tests {
     fn manifest_hash_changes_with_field_added() {
         let base = sample_manifest();
         let mut extended = base.clone();
-        extended.push(FieldDescriptor {
-            field_name: "phone".into(),
-            field_type: "Option<String>".into(),
-            field_order: 4,
-        });
-        assert_ne!(
-            compute_manifest_hash(&base),
-            compute_manifest_hash(&extended)
-        );
+        extended.push(FieldDescriptor { field_name: "phone".into(), field_type: "Option<String>".into(), field_order: 4 });
+        assert_ne!(compute_manifest_hash(&base), compute_manifest_hash(&extended));
     }
 
     #[test]
@@ -117,10 +80,7 @@ mod tests {
         let base = sample_manifest();
         let mut modified = base.clone();
         modified[0].field_type = "Option<String>".into();
-        assert_ne!(
-            compute_manifest_hash(&base),
-            compute_manifest_hash(&modified)
-        );
+        assert_ne!(compute_manifest_hash(&base), compute_manifest_hash(&modified));
     }
 
     #[test]
@@ -128,10 +88,7 @@ mod tests {
         let base = sample_manifest();
         let mut modified = base.clone();
         modified[0].field_name = "email_address".into();
-        assert_ne!(
-            compute_manifest_hash(&base),
-            compute_manifest_hash(&modified)
-        );
+        assert_ne!(compute_manifest_hash(&base), compute_manifest_hash(&modified));
     }
 
     #[test]

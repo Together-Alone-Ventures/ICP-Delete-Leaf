@@ -1,17 +1,31 @@
 //! # Deterministic CBOR Serialisation
 //!
-//! encode_pii_state() -- the single safe encoding entry point for
-//! producing get_state_bytes() output.
+//! `encode_pii_state()` -- the single safe encoding entry point for
+//! producing `get_state_bytes()` output.
 //!
-//! ## Canonicalisation Checklist
+//! ## Important: "Deterministic", not "Canonical"
 //!
-//! - All PII fields listed in manifest are included, in field_order
-//! - No floating-point fields -- rejected at encode time
-//! - No HashMap/BTreeMap types in PII structs (enforced by convention;
-//!   ciborium serialises Rust structs as CBOR maps with deterministic
-//!   field ordering, so struct-as-map is safe)
-//! - Same logical state always produces the same bytes
-//! - encode_pii_state() is the ONLY path to produce hashable state bytes
+//! This module produces **deterministic CBOR under this library's encoder**
+//! (ciborium + serde). The same Rust struct with the same field values
+//! will always produce identical bytes. However, this is NOT canonical
+//! CBOR in the RFC 8949 sense (which requires sorted map keys, etc.).
+//!
+//! Determinism is guaranteed because:
+//! - ciborium + serde serialises struct fields in declaration order
+//! - We reject floats (which have non-deterministic representations)
+//! - Adapters must use `encode_pii_state()` as the only encoding path
+//!
+//! **Future direction:** Consider encoding PII state as a CBOR array
+//! (tuple of values in manifest order) rather than a map, which would
+//! give byte-level determinism independent of the CBOR library.
+//!
+//! ## Adapter Rules
+//!
+//! - All PII fields listed in manifest, in `field_order`
+//! - No `f32`/`f64` fields -- rejected at encode time
+//! - No `HashMap`/`BTreeMap` in PII structs (enforced by convention;
+//!   use structs with named fields)
+//! - `encode_pii_state()` is the ONLY path to produce hashable state bytes
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -40,6 +54,15 @@ impl fmt::Display for SerialisationError {
 
 impl std::error::Error for SerialisationError {}
 
+/// Encode a PII state struct to deterministic CBOR bytes.
+///
+/// This is the **only** function adapters should use to produce bytes
+/// for `get_state_bytes()`. It serialises via ciborium then validates
+/// the output contains no floats.
+///
+/// Determinism depends on ciborium's serde implementation serialising
+/// struct fields in declaration order. Adapters must use structs (not
+/// HashMap/BTreeMap) to ensure consistent field ordering.
 pub fn encode_pii_state<T: Serialize>(value: &T) -> Result<Vec<u8>, SerialisationError> {
     let mut buf = Vec::new();
     ciborium::into_writer(value, &mut buf)
@@ -48,6 +71,7 @@ pub fn encode_pii_state<T: Serialize>(value: &T) -> Result<Vec<u8>, Serialisatio
     Ok(buf)
 }
 
+/// Decode deterministic CBOR bytes back to a PII state struct.
 pub fn decode_pii_state<T: for<'de> Deserialize<'de>>(
     bytes: &[u8],
 ) -> Result<T, SerialisationError> {
@@ -56,6 +80,14 @@ pub fn decode_pii_state<T: for<'de> Deserialize<'de>>(
         .map_err(|e| SerialisationError::DecodingFailed(e.to_string()))
 }
 
+/// Validate that CBOR bytes contain no floats.
+///
+/// Walks the CBOR value tree recursively. Rejects any floating-point
+/// values (f16/f32/f64) because IEEE 754 has non-deterministic
+/// representations (NaN bit patterns, +/-0).
+///
+/// Maps are allowed because ciborium serialises Rust structs as CBOR
+/// maps with deterministic field ordering.
 pub fn validate_cbor_bytes(bytes: &[u8]) -> Result<(), SerialisationError> {
     let value: ciborium::Value = ciborium::from_reader(bytes)
         .map_err(|e| SerialisationError::ValidationFailed(e.to_string()))?;

@@ -31,23 +31,28 @@ pub const TOMBSTONE_SEED: &[u8] = b"MKTD_TOMBSTONE_V1";
 // Domain separation tags (used as prefixes in hash computations)
 // ---------------------------------------------------------------------------
 
+/// A domain separation tag. Wraps a static byte slice to enforce
+/// tag-first ordering in hash computations via [`hash_with_tag`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DomainTag(pub &'static [u8]);
+
 /// Domain tag for tombstone_hash field in the deletion receipt.
-pub const TAG_TOMBSTONE_HASH: &[u8] = b"MKTD02_TOMBSTONE_HASH_V1";
+pub const TAG_TOMBSTONE_HASH: DomainTag = DomainTag(b"MKTD02_TOMBSTONE_HASH_V1");
 
 /// Domain tag for deletion_event_hash.
-pub const TAG_EVENT: &[u8] = b"MKTD02_EVENT_V1";
+pub const TAG_EVENT: DomainTag = DomainTag(b"MKTD02_EVENT_V1");
 
 /// Domain tag for certified_commitment.
-pub const TAG_CERTIFIED: &[u8] = b"MKTD02_CERTIFIED_V1";
+pub const TAG_CERTIFIED: DomainTag = DomainTag(b"MKTD02_CERTIFIED_V1");
 
 /// Domain tag for receipt_id derivation.
-pub const TAG_RECEIPT: &[u8] = b"MKTD02_RECEIPT_V1";
+pub const TAG_RECEIPT: DomainTag = DomainTag(b"MKTD02_RECEIPT_V1");
 
 /// Domain tag for per-canister salt derivation.
-pub const TAG_SALT: &[u8] = b"MKTD02_SALT_V1";
+pub const TAG_SALT: DomainTag = DomainTag(b"MKTD02_SALT_V1");
 
 /// Domain tag for manifest_hash computation.
-pub const TAG_MANIFEST: &[u8] = b"MKTD02_MANIFEST_V1";
+pub const TAG_MANIFEST: DomainTag = DomainTag(b"MKTD02_MANIFEST_V1");
 
 // ---------------------------------------------------------------------------
 // SHA-256 wrapper
@@ -60,9 +65,23 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
+/// Compute a domain-separated hash: `SHA-256(tag || part_0 || part_1 || ...)`.
+///
+/// The [`DomainTag`] newtype enforces that the tag is always the first
+/// element in the hash preimage, preventing accidental misordering.
+pub fn hash_with_tag(tag: DomainTag, parts: &[&[u8]]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(tag.0);
+    for part in parts {
+        hasher.update(part);
+    }
+    hasher.finalize().into()
+}
+
 /// Compute SHA-256 of multiple byte slices concatenated in order.
 ///
-/// The first slice should always be the domain separation tag.
+/// **Prefer [`hash_with_tag`] for domain-separated hashes.** This
+/// function is for cases without a domain tag (e.g., salt || state_bytes).
 pub fn sha256_concat(parts: &[&[u8]]) -> [u8; 32] {
     let mut hasher = Sha256::new();
     for part in parts {
@@ -103,36 +122,46 @@ mod tests {
     }
 
     #[test]
-    fn sha256_concat_matches_manual() {
-        let manual = sha256(&[TAG_EVENT, b"data"].concat());
-        let via_concat = sha256_concat(&[TAG_EVENT, b"data"]);
-        assert_eq!(manual, via_concat);
+    fn hash_with_tag_matches_concat() {
+        let via_tag = hash_with_tag(TAG_EVENT, &[b"data"]);
+        let via_concat = sha256_concat(&[TAG_EVENT.0, b"data"]);
+        assert_eq!(via_tag, via_concat);
     }
 
     #[test]
-    fn sha256_concat_order_matters() {
-        let ab = sha256_concat(&[b"a", b"b"]);
-        let ba = sha256_concat(&[b"b", b"a"]);
+    fn hash_with_tag_order_matters() {
+        let ab = hash_with_tag(TAG_EVENT, &[b"a", b"b"]);
+        let ba = hash_with_tag(TAG_EVENT, &[b"b", b"a"]);
         assert_ne!(ab, ba);
     }
 
     #[test]
     fn domain_tags_are_distinct() {
-        let tags: &[&[u8]] = &[
+        let tags: &[DomainTag] = &[
             TAG_TOMBSTONE_HASH,
             TAG_EVENT,
             TAG_CERTIFIED,
             TAG_RECEIPT,
             TAG_SALT,
             TAG_MANIFEST,
-            TOMBSTONE_SEED,
         ];
         for (i, a) in tags.iter().enumerate() {
             for (j, b) in tags.iter().enumerate() {
                 if i != j {
-                    assert_ne!(a, b, "tags at index {} and {} collide", i, j);
+                    assert_ne!(a.0, b.0, "tags at index {} and {} collide", i, j);
                 }
             }
+        }
+    }
+
+    #[test]
+    fn tombstone_seed_differs_from_all_tags() {
+        let tags: &[DomainTag] = &[
+            TAG_TOMBSTONE_HASH, TAG_EVENT, TAG_CERTIFIED,
+            TAG_RECEIPT, TAG_SALT, TAG_MANIFEST,
+        ];
+        for tag in tags {
+            assert_ne!(TOMBSTONE_SEED, tag.0);
         }
     }
 

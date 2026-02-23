@@ -12,12 +12,10 @@ use crate::storage::{
 };
 use crate::trait_def::MKTdDataSource;
 use crate::MktdConfig;
-use candid::Principal;
-use zombie_core::hashing::{sha256_concat, TAG_EVENT, TAG_TOMBSTONE_HASH, ZERO_HASH};
+use zombie_core::hashing::{hash_with_tag, TAG_EVENT, TAG_TOMBSTONE_HASH, ZERO_HASH};
 use zombie_core::receipt::{compute_receipt_id, DeletionReceipt};
 use zombie_core::tombstone::tombstone_constant;
 
-/// Errors from execute_deletion().
 #[derive(Debug, Clone)]
 pub enum DeletionError {
     AlreadyTombstoned,
@@ -34,22 +32,6 @@ impl core::fmt::Display for DeletionError {
 }
 
 /// Execute the full deletion flow. Returns the receipt_id on success.
-///
-/// ## Flow (synchronous, single message)
-/// (a) Validate not tombstoned
-/// (b) Capture pre_state_hash
-/// (c) Call adapter.tombstone_state()
-/// (c2) Post-tombstone invariant check
-/// (d) Capture post_state_hash
-/// (e) Increment nonce
-/// (f) Compute tombstone_hash
-/// (g) Read module_hash from meta cell
-/// (h) Compute deletion_event_hash
-/// (i) Store tombstoned_at
-/// (j) Compute + publish certified_commitment
-/// (k) Construct receipt
-/// (l) Store receipt
-/// (m) Return receipt_id
 pub fn execute_deletion<A: MKTdDataSource>(
     adapter: &mut A,
     config: &MktdConfig,
@@ -83,8 +65,7 @@ pub fn execute_deletion<A: MKTdDataSource>(
     let nonce = increment_nonce();
 
     // (f) Compute tombstone_hash
-    let tombstone_hash = sha256_concat(&[
-        TAG_TOMBSTONE_HASH,
+    let tombstone_hash = hash_with_tag(TAG_TOMBSTONE_HASH, &[
         canister_id.as_slice(),
         tombstone_constant(),
         &timestamp.to_be_bytes(),
@@ -97,8 +78,7 @@ pub fn execute_deletion<A: MKTdDataSource>(
     });
 
     // (h) Compute deletion_event_hash
-    let deletion_event_hash = sha256_concat(&[
-        TAG_EVENT,
+    let deletion_event_hash = hash_with_tag(TAG_EVENT, &[
         &pre_state_hash,
         &post_state_hash,
         &timestamp.to_be_bytes(),
@@ -107,7 +87,7 @@ pub fn execute_deletion<A: MKTdDataSource>(
         &nonce.to_be_bytes(),
     ]);
 
-    // (i) Store tombstoned_at
+    // (i) Store tombstoned_at (engine-owned; see storage.rs docs)
     with_storage_mut(|s| {
         s.tombstoned_at
             .set(OptionalTimestamp(Some(timestamp)))
@@ -157,26 +137,20 @@ pub fn execute_deletion<A: MKTdDataSource>(
 }
 
 /// Upgrade cascade: detect manifest changes, update module_hash.
-///
-/// Called from on_post_upgrade().
 pub(crate) fn upgrade_cascade<A: MKTdDataSource>(
     adapter: &A,
     module_hash: [u8; 32],
 ) {
     let new_manifest_hash = adapter.manifest_hash();
-
-    // (1-2) Check for manifest change
     let stored_manifest_hash = with_storage(|s| s.manifest_hash.get().0);
 
     if new_manifest_hash != stored_manifest_hash {
-        // Manifest changed: full recomputation cascade
         with_storage_mut(|s| {
             s.manifest_hash
                 .set(Hash32(new_manifest_hash))
                 .expect("MKTd02: failed to update manifest_hash");
         });
 
-        // Recompute state_hash under new manifest
         let state_bytes = adapter.get_state_bytes();
         let new_state_hash = compute_state_hash(&state_bytes);
         with_storage_mut(|s| {
@@ -185,12 +159,11 @@ pub(crate) fn upgrade_cascade<A: MKTdDataSource>(
                 .expect("MKTd02: failed to update state_hash in cascade");
         });
 
-        // Recompute certified_commitment with existing deletion_event_hash
         let existing_event_hash = with_storage(|s| s.deletion_event_hash.get().0);
         publish_certified_commitment(&new_state_hash, &existing_event_hash);
     }
 
-    // (3) Update module_hash unconditionally
+    // Update module_hash unconditionally
     with_storage_mut(|s| {
         let mut meta = s.meta.get().clone();
         meta.module_hash = module_hash;
@@ -207,7 +180,6 @@ pub(crate) fn first_init<A: MKTdDataSource>(
 ) {
     let timestamp = ic_cdk::api::time();
 
-    // Compute and store manifest_hash
     let manifest_hash = adapter.manifest_hash();
     with_storage_mut(|s| {
         s.manifest_hash
@@ -215,20 +187,17 @@ pub(crate) fn first_init<A: MKTdDataSource>(
             .expect("MKTd02: failed to store manifest_hash");
     });
 
-    // Compute and store initial state_hash
     crate::state::init_state_hash(&adapter.get_state_bytes());
 
-    // Compute and publish initial certified_commitment
     let state_hash = crate::state::read_state_hash();
     publish_certified_commitment(&state_hash, &ZERO_HASH);
 
-    // Store meta cell
     with_storage_mut(|s| {
         let meta = MetaCell {
             schema_version: crate::storage::schema_version(),
             memory_base: config.base_memory_id as u32,
             initialised_at: Some(timestamp),
-            module_hash: [0u8; 32], // zeros at init (chicken-and-egg)
+            module_hash: [0u8; 32],
         };
         s.meta
             .set(meta)

@@ -14,6 +14,15 @@
 //! | base+7  | tombstoned_at        | Option<u64>                                   |
 //!
 //! Range check on init: base + 7 <= 255, else trap.
+//!
+//! ## Endianness Convention
+//!
+//! - **Stable memory encoding** (Storable impls): little-endian (LE).
+//!   This matches ICP's native memory representation.
+//! - **Hash preimages** (in hashing.rs, engine.rs, etc.): big-endian (BE).
+//!   This follows cryptographic convention for unambiguous byte ordering.
+//!
+//! These are separate domains and must not be confused.
 
 use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
 use ic_stable_structures::storable::Bound;
@@ -32,10 +41,10 @@ pub(crate) type Memory = VirtualMemory<DefaultMemoryImpl>;
 pub(crate) struct Hash32(pub [u8; 32]);
 
 impl Storable for Hash32 {
-    fn to_bytes(&self) -> Cow<[u8]> {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
         Cow::Borrowed(&self.0)
     }
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
         let mut arr = [0u8; 32];
         arr.copy_from_slice(&bytes);
         Self(arr)
@@ -47,6 +56,8 @@ impl Storable for Hash32 {
 }
 
 /// Meta cell: schema_version(4) + memory_base(4) + has_init(1) + init_at(8) + module_hash(32) = 49 bytes
+///
+/// All integer fields use little-endian encoding (stable memory convention).
 #[derive(Clone, Debug)]
 pub(crate) struct MetaCell {
     pub schema_version: u32,
@@ -67,7 +78,7 @@ impl Default for MetaCell {
 }
 
 impl Storable for MetaCell {
-    fn to_bytes(&self) -> Cow<[u8]> {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut buf = vec![0u8; 49];
         buf[0..4].copy_from_slice(&self.schema_version.to_le_bytes());
         buf[4..8].copy_from_slice(&self.memory_base.to_le_bytes());
@@ -81,7 +92,7 @@ impl Storable for MetaCell {
         buf[17..49].copy_from_slice(&self.module_hash);
         Cow::Owned(buf)
     }
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
         let schema_version = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
         let memory_base = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
         let has_init = bytes[8];
@@ -102,15 +113,15 @@ impl Storable for MetaCell {
     };
 }
 
-/// u64 wrapper for nonce storage.
+/// u64 wrapper for nonce storage. Little-endian encoding.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct StorableU64(pub u64);
 
 impl Storable for StorableU64 {
-    fn to_bytes(&self) -> Cow<[u8]> {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
         Cow::Owned(self.0.to_le_bytes().to_vec())
     }
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
         Self(u64::from_le_bytes(bytes[0..8].try_into().unwrap()))
     }
     const BOUND: Bound = Bound::Bounded {
@@ -119,12 +130,15 @@ impl Storable for StorableU64 {
     };
 }
 
-/// Optional timestamp for tombstoned_at: 1 byte discriminant + 8 bytes u64.
+/// Optional timestamp for tombstoned_at: 1 byte discriminant + 8 bytes u64 (LE).
+///
+/// **This field is engine-owned.** Only `execute_deletion()` may set it.
+/// External code must not write to this slot directly.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct OptionalTimestamp(pub Option<u64>);
 
 impl Storable for OptionalTimestamp {
-    fn to_bytes(&self) -> Cow<[u8]> {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut buf = vec![0u8; 9];
         if let Some(ts) = self.0 {
             buf[0] = 1;
@@ -132,7 +146,7 @@ impl Storable for OptionalTimestamp {
         }
         Cow::Owned(buf)
     }
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
         if bytes[0] == 1 {
             let ts = u64::from_le_bytes(bytes[1..9].try_into().unwrap());
             Self(Some(ts))
@@ -147,18 +161,21 @@ impl Storable for OptionalTimestamp {
 }
 
 /// Receipt value wrapper (CBOR-encoded DeletionReceipt).
+///
+/// Max size: 8192 bytes. Current receipts are well under this limit.
+/// If future fields push receipts larger, increase this bound.
 #[derive(Clone, Debug)]
 pub(crate) struct ReceiptBytes(pub Vec<u8>);
 
 impl Storable for ReceiptBytes {
-    fn to_bytes(&self) -> Cow<[u8]> {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
         Cow::Borrowed(&self.0)
     }
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
         Self(bytes.to_vec())
     }
     const BOUND: Bound = Bound::Bounded {
-        max_size: 4096,
+        max_size: 8192,
         is_fixed_size: false,
     };
 }
@@ -224,9 +241,14 @@ pub(crate) fn setup_storage(mm: &MemoryManager<DefaultMemoryImpl>, base: u8) {
         .expect("MKTd02: failed to init tombstoned_at cell"),
     };
 
-    // Collision detection: if meta cell has a different base, trap.
+    // Collision detection (belt-and-suspenders):
+    // Check initialised_at, schema_version, or memory_base to detect prior init.
     let existing = storage.meta.get();
-    if existing.initialised_at.is_some() && existing.memory_base != base as u32 {
+    let previously_initialised = existing.initialised_at.is_some()
+        || existing.schema_version != 0
+        || existing.memory_base != 0;
+
+    if previously_initialised && existing.memory_base != base as u32 {
         ic_cdk::trap(&format!(
             "MKTd02 already initialised at base={}; requested base={}",
             existing.memory_base, base

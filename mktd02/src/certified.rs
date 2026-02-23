@@ -3,18 +3,16 @@
 //! Domain tag: `MKTD02_CERTIFIED_V1`
 //!
 //! certified_commitment = SHA-256(MKTD02_CERTIFIED_V1 || post_state_hash || deletion_event_hash)
-//!
-//! Published via `ic_cdk::api::set_certified_data()`.
 
 use crate::storage::{with_storage, with_storage_mut, Hash32};
-use zombie_core::hashing::{sha256_concat, TAG_CERTIFIED};
+use zombie_core::hashing::{hash_with_tag, TAG_CERTIFIED};
 
 /// Compute the certified commitment from state_hash and deletion_event_hash.
 pub(crate) fn compute_certified_commitment(
     state_hash: &[u8; 32],
     deletion_event_hash: &[u8; 32],
 ) -> [u8; 32] {
-    sha256_concat(&[TAG_CERTIFIED, state_hash, deletion_event_hash])
+    hash_with_tag(TAG_CERTIFIED, &[state_hash, deletion_event_hash])
 }
 
 /// Compute, store, and publish the certified commitment.
@@ -38,8 +36,6 @@ pub(crate) fn read_certified_commitment() -> [u8; 32] {
 }
 
 /// Return (state_hash, Option<certificate>) for certified query responses.
-///
-/// The certificate is present in query context and absent in update context.
 pub fn get_certified_state_hash() -> ([u8; 32], Option<Vec<u8>>) {
     let state_hash = crate::state::read_state_hash();
     let cert = ic_cdk::api::data_certificate();

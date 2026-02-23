@@ -1,18 +1,19 @@
 //! # State Hash Computation
 //!
-//! Domain tag: `MKTD02_SALT_V1`
-//!
 //! The per-canister salt is derived at runtime (not stored):
 //! `mktd_salt = SHA-256(MKTD02_SALT_V1 || canister_id_bytes)`
 //!
 //! State hash: `SHA-256(mktd_salt || state_bytes)`
+//!
+//! Note: state_hash uses sha256_concat (salt is not a domain tag but a
+//! derived value), while salt derivation uses hash_with_tag.
 
 use crate::storage::{with_storage, with_storage_mut, Hash32};
-use zombie_core::hashing::{sha256_concat, TAG_SALT};
+use zombie_core::hashing::{hash_with_tag, sha256_concat, TAG_SALT};
 
 /// Derive the per-canister salt. Deterministic from canister_id.
 pub(crate) fn compute_salt() -> [u8; 32] {
-    sha256_concat(&[TAG_SALT, ic_cdk::id().as_slice()])
+    hash_with_tag(TAG_SALT, &[ic_cdk::id().as_slice()])
 }
 
 /// Compute state_hash from PII state bytes.
@@ -34,7 +35,6 @@ pub(crate) fn init_state_hash(state_bytes: &[u8]) {
 }
 
 /// Recompute and store state hash after a PII mutation.
-/// Called by the host canister after each write to PII fields.
 pub(crate) fn refresh_state_hash_internal(state_bytes: &[u8]) {
     let hash = compute_state_hash(state_bytes);
     with_storage_mut(|s| {

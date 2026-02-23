@@ -1,0 +1,19 @@
+[package]
+name = "mktd02"
+description = "MKTd02 Leaf-mode CVDR engine for ICP canisters"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+zombie-core = { path = "../zombie-core" }
+ic-cdk = "0.17"
+ic-stable-structures = "0.6"
+candid = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", optional = true }
+
+[features]
+default = []
+json = ["serde_json"]

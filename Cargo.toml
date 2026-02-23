@@ -1,0 +1,13 @@
+[workspace]
+members = [
+    "zombie-core",
+    "mktd02",
+    "mktd02-macros",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/Together-Alone-Ventures/MKTd02"

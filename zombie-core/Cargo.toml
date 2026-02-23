@@ -11,3 +11,6 @@ sha2 = "0.10"
 ciborium = "0.2"
 serde = { version = "1", features = ["derive"] }
 candid = "0.10"
+
+[dev-dependencies]
+hex = "0.4"

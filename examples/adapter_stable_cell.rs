@@ -30,7 +30,7 @@ use zombie_core::serialisation::encode_pii_state;
 use zombie_core::tombstone::tombstone_constant;
 use serde::{Deserialize, Serialize};
 
-/// The PII-only subset of the profile, in canonical field_order.
+/// The PII-only subset of the profile, in manifest field_order.
 /// This struct is what gets CBOR-encoded for state hashing.
 #[derive(Serialize, Deserialize)]
 struct PiiState {
@@ -81,7 +81,7 @@ impl MKTdDataSource for ProfileAdapter {
     }
 
     fn get_state_bytes(&self) -> Vec<u8> {
-        // Read from your StableCell, extract PII fields in canonical order
+        // Read from your StableCell, extract PII fields in manifest field_order
         let pii = PiiState {
             email: todo!("read from PROFILE cell"),
             birthdate: todo!("read from PROFILE cell"),

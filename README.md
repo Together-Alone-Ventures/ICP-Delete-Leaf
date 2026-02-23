@@ -149,6 +149,7 @@ For adapters implementing `MKTdDataSource`:
 - [ ] No `f32`/`f64` fields in PII state (floats are rejected)
 - [ ] No `HashMap`/`BTreeMap` at the PII struct level (use structs)
 - [ ] Field order in manifest matches field order in serialisation struct
+- [ ] CBOR encoding is deterministic under `encode_pii_state()`; this is **not** RFC 8949 canonical CBOR
 
 ## Status
 

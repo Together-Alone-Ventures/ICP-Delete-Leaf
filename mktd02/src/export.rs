@@ -1,12 +1,12 @@
 //! # Receipt Export
 //!
-//! - `to_cbor_bytes()` -- always available; canonical CBOR encoding
+//! - `to_cbor_bytes()` -- always available; deterministic CBOR encoding
 //! - `to_json()` -- behind `#[cfg(feature = "json")]`
 //! - `webhook_push()` -- behind `#[cfg(feature = "json")]`; template only
 
 use zombie_core::DeletionReceipt;
 
-/// Serialise a receipt to canonical CBOR bytes.
+/// Serialise a receipt to deterministic CBOR bytes.
 pub fn to_cbor_bytes(receipt: &DeletionReceipt) -> Vec<u8> {
     let mut buf = Vec::new();
     ciborium::into_writer(receipt, &mut buf).expect("MKTd02: CBOR encoding of receipt failed");

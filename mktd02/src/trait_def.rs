@@ -28,7 +28,7 @@ impl CommitMode {
 /// - `mode()`: Declares Leaf or Tree commit mode
 /// - `pii_field_manifest()`: Defines the PII boundary
 /// - `manifest_hash()`: Precomputed hash of the manifest
-/// - `get_state_bytes()`: Current PII state as canonical CBOR bytes
+/// - `get_state_bytes()`: Current PII state as deterministic CBOR bytes
 /// - `tombstone_state()`: Overwrites all PII fields with TOMBSTONE_CONSTANT
 /// - `is_tombstoned()`: Checks whether all PII fields are tombstoned
 pub trait MKTdDataSource {
@@ -36,7 +36,7 @@ pub trait MKTdDataSource {
     fn pii_field_manifest(&self) -> Vec<FieldDescriptor>;
     fn manifest_hash(&self) -> [u8; 32];
 
-    /// Return canonical CBOR bytes of current PII state.
+    /// Return deterministic CBOR bytes of current PII state.
     /// **Must** use `zombie_core::encode_pii_state()`.
     fn get_state_bytes(&self) -> Vec<u8>;
 

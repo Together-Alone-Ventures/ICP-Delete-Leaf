@@ -177,6 +177,7 @@ pub(crate) fn upgrade_cascade<A: MKTdDataSource>(
 pub(crate) fn first_init<A: MKTdDataSource>(
     adapter: &A,
     config: &MktdConfig,
+    module_hash: [u8; 32],
 ) {
     let timestamp = ic_cdk::api::time();
 
@@ -197,7 +198,7 @@ pub(crate) fn first_init<A: MKTdDataSource>(
             schema_version: crate::storage::schema_version(),
             memory_base: config.base_memory_id as u32,
             initialised_at: Some(timestamp),
-            module_hash: [0u8; 32],
+            module_hash,
         };
         s.meta
             .set(meta)

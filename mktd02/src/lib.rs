@@ -67,15 +67,13 @@ pub fn init<A: MKTdDataSource>(
     adapter: &A,
     memory_manager: &MemoryManager<DefaultMemoryImpl>,
     config: MktdConfig,
+    module_hash: [u8; 32],
 ) {
     storage::setup_storage(memory_manager, config.base_memory_id);
-
-    // If already initialised, this is a no-op (idempotent).
     if guard::is_initialised() {
         return;
     }
-
-    engine::first_init(adapter, &config);
+    engine::first_init(adapter, &config, module_hash);
 }
 
 /// Post-upgrade handler. Call from `#[post_upgrade]`.

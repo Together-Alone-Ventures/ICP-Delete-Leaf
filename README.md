@@ -52,13 +52,43 @@ impl MKTdDataSource for ProfileAdapter {
 fn init(owner: Principal) {
     // ... your init logic ...
     let adapter = ProfileAdapter;
+    let module_hash = [0u8; 32]; // zeros for dev; real post-shrink WASM hash for production
     MEMORY_MANAGER.with(|mm| {
         mktd02::init(&adapter, &mm.borrow(), MktdConfig {
             base_memory_id: 100,
             subnet_id: Principal::anonymous(), // real subnet ID for production
-        });
+        }, module_hash);
     });
 }
+```
+
+This makes init() consistent with post_upgrade() — both now receive module_hash, matching the actual committed library API.
+
+---
+
+### Fix 2 — Minor: Module Hash Pipeline Rule section doesn't mention init()
+
+**Current:**
+> Module hash is captured at init/upgrade time, not per-deletion.
+
+That sentence is fine, but the paragraph above it only talks about the build pipeline without explicitly stating that `init()` now accepts `module_hash` alongside `on_post_upgrade()`. Since someone skimming might only read the Quick Start and this section:
+
+**Add one sentence** after "For local dev, zeros are accepted.":
+
+> Both `init()` and `on_post_upgrade()` accept `module_hash: [u8; 32]`. A fresh deployment with zeros produces receipts where V3 verification is impossible — this is non-functional for production, not "acceptable."
+
+This captures Reframing 4 from the session (the "local dev acceptable was sloppy" correction).
+
+---
+
+### Fix 3 — Minor: State Encoding Spec mention
+
+The Deterministic Encoding Checklist covers the *how* of encoding but doesn't mention the *publishing* requirement from A2/B4. Add one bullet at the end of the checklist:
+```
+- [ ] Adapter publishes a State Encoding Spec documenting field names, types, 
+      serialisation order, tombstone values, and encoding library version — 
+      anchored by `manifest_hash`. Required for independent `post_state_hash` 
+      reproduction.
 
 #[post_upgrade]
 fn post_upgrade() {

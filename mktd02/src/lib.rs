@@ -90,7 +90,7 @@ pub fn on_post_upgrade<A: MKTdDataSource>(
 
     // If not yet initialised (upgrade that adds MKTd02), run first_init.
     if !guard::is_initialised() {
-        engine::first_init(adapter, &config);
+        engine::first_init(adapter, &config, module_hash);
     }
 
     engine::upgrade_cascade(adapter, module_hash);

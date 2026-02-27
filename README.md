@@ -271,6 +271,16 @@ Verifier obtains a certified query response from the canister (or uses the certi
 
 **Result:** The tombstone has not been reversed since the receipt was generated. This is a point-in-time check, not a continuous guarantee. If the tombstone has been reversed, the state hash will differ.
 
+## Verification reference code
+
+Independent verification tools for CVDRs produced by this library are maintained in a separate repository: [CVDR-Verify](https://github.com/Together-Alone-Ventures/CVDR-Verify).
+
+The verification tooling implements procedures V1–V4:
+- **V1** — Cryptographic hash recomputation (receipt integrity)
+- **V2** — BLS subnet certificate verification (ICP trust anchor)
+- **V3** — Module hash comparison (code provenance)
+- **V4** — Tombstone persistence check (deletion durability)
+
 ## Stable Memory Coordination
 
 MKTd02 allocates **8 stable memory slots** starting from a configurable base MemoryId (default: 100).

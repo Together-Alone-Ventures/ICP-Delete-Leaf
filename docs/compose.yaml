@@ -1,0 +1,64 @@
+title: "MKTd02 Integration Guide"
+version: "3.0"
+date: "27 February 2026"
+output: "MKTd02_Integration_Guide.md"
+
+# ── Shared docs source ────────────────────────────────────────────────
+# These fields are read by the GitHub Action (.github/workflows/build-guide.yml)
+# to clone the correct repo and ref BEFORE invoking compose.py.
+# compose.py itself takes the shared docs path as a CLI argument and does not
+# read these fields. They live here so the manifest is the single source of
+# truth for "which shared docs version does this product release use".
+shared_repo: "Together-Alone-Ventures/zombie-delete-docs"
+shared_ref: "v1.0.0"  # pin to tag for releases; use "main" for dev builds
+
+# ── Section composition order ─────────────────────────────────────────
+#
+# Directives:
+#   local:          Path relative to docs/sections/
+#   shared:         Path relative to zombie-delete-docs root
+#   merge:          Two files combined (base + append).
+#                   Paths use shared/ prefix for shared docs, bare for local.
+#   heading:        Top-level markdown heading injected before section content.
+#   preamble:       Paragraph injected after heading, before section content.
+#   strip_heading:  If true, remove the first ## (or deeper) heading from the
+#                   section content. Use when a heading directive replaces a
+#                   redundant file heading. Default: false.
+
+sections:
+  - local: 00-header.md
+
+  - heading: "# 1. Prerequisites"
+    merge:
+      base: shared/icp/prerequisites-platform.md
+      append: 01-prereqs-product.md
+
+  - heading: "# 2. Step-by-Step Integration"
+    preamble: "The integration comprises five tasks. Estimated total effort: 1–2 days for a developer familiar with ICP canister development. No changes to the canister's existing business logic are required."
+    local: 02-add-crate.md
+
+  - local: 03-adapter.md
+  - shared: icp/deterministic-encoding.md
+  - local: 04-lifecycle-hooks.md
+  - shared: icp/module-hash-pipeline.md
+  - local: 05-api-endpoints.md
+  - shared: icp/tombstone-patterns.md
+  - local: 06-stable-memory.md
+
+  - heading: "# 3. Authentication Patterns (ICP)"
+    shared: icp/authentication-patterns.md
+    strip_heading: true
+
+  - heading: "# 4. Receipt Export"
+    local: 07-receipt-export.md
+    strip_heading: true
+
+  - heading: "# 5. Reference Adapters"
+    local: 08-ref-adapters.md
+    strip_heading: true
+
+  - heading: "# 6. Assumptions"
+    merge:
+      base: 09-assumptions-product.md
+      append: shared/icp/assumptions-platform.md
+    strip_heading: true

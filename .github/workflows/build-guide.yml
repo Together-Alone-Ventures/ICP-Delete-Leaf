@@ -1,0 +1,102 @@
+name: Build Integration Guide
+
+# Triggers:
+#   1. Automatic: when a GitHub Release is published
+#   2. Manual: the "Run workflow" button in Actions tab
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      shared_ref:
+        description: 'zombie-delete-docs ref to use (tag, branch, or SHA). Leave blank to use compose.yaml default.'
+        required: false
+        default: ''
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout product repo
+        uses: actions/checkout@v4
+
+      # ── Read shared_ref from manifest (unless overridden) ─────────
+      - name: Determine shared docs ref
+        id: ref
+        run: |
+          if [ -n "${{ github.event.inputs.shared_ref }}" ]; then
+            echo "shared_ref=${{ github.event.inputs.shared_ref }}" >> "$GITHUB_OUTPUT"
+            echo "Using manual override: ${{ github.event.inputs.shared_ref }}"
+          else
+            REF=$(python3 -c "
+          import yaml
+          with open('docs/compose.yaml') as f:
+              m = yaml.safe_load(f)
+          print(m.get('shared_ref', 'main'))
+          ")
+            echo "shared_ref=$REF" >> "$GITHUB_OUTPUT"
+            echo "Using manifest default: $REF"
+          fi
+
+      - name: Determine shared docs repo
+        id: repo
+        run: |
+          REPO=$(python3 -c "
+          import yaml
+          with open('docs/compose.yaml') as f:
+              m = yaml.safe_load(f)
+          print(m.get('shared_repo', 'Together-Alone-Ventures/zombie-delete-docs'))
+          ")
+          echo "shared_repo=$REPO" >> "$GITHUB_OUTPUT"
+
+      # ── Clone shared docs at the determined ref ───────────────────
+      - name: Clone shared docs
+        run: |
+          git clone \
+            --depth 1 \
+            --branch "${{ steps.ref.outputs.shared_ref }}" \
+            "https://github.com/${{ steps.repo.outputs.shared_repo }}.git" \
+            /tmp/shared-docs
+
+      # ── Compose ───────────────────────────────────────────────────
+      - name: Install PyYAML
+        run: pip install pyyaml
+
+      - name: Compose integration guide
+        run: python3 docs/scripts/compose.py /tmp/shared-docs docs/compose.yaml
+
+      # ── Convert to PDF (optional) ────────────────────────────────
+      - name: Convert to PDF
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq pandoc texlive-xetex texlive-fonts-recommended > /dev/null 2>&1
+          pandoc MKTd02_Integration_Guide.md \
+            -o MKTd02_Integration_Guide.pdf \
+            --pdf-engine=xelatex \
+            -V geometry:margin=1in \
+            -V colorlinks=true \
+            --toc \
+            --toc-depth=2 \
+            -V title="MKTd02 Integration Guide" \
+            -V date="$(date +%Y-%m-%d)"
+
+      # ── Upload to Release (on release trigger) ───────────────────
+      - name: Attach to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            MKTd02_Integration_Guide.md
+            MKTd02_Integration_Guide.pdf
+
+      # ── Upload as artifact (on manual trigger) ───────────────────
+      - name: Upload as workflow artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-guide
+          path: |
+            MKTd02_Integration_Guide.md
+            MKTd02_Integration_Guide.pdf
+          retention-days: 30

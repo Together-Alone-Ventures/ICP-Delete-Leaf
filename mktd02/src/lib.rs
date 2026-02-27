@@ -61,8 +61,8 @@ impl Default for MktdConfig {
 /// First-time initialisation. Call from `#[init]`.
 ///
 /// Sets up stable memory, computes initial state hash, publishes
-/// certified commitment. Module hash is set to zeros (chicken-and-egg;
-/// updated on first `on_post_upgrade`).
+/// certified commitment. Module hash is provided by the deployer
+/// (see Module Hash: Deployment Patterns in the Integration Guide).
 pub fn init<A: MKTdDataSource>(
     adapter: &A,
     memory_manager: &MemoryManager<DefaultMemoryImpl>,

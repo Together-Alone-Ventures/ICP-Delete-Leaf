@@ -8,13 +8,12 @@ Call `mktd02::init()` at the end of your canister's init function, after all ini
 
 ```rust
 let adapter = MyAdapter;
-let module_hash = [0u8; 32]; // ⚠ DEV ONLY — see Module Hash: Deployment Patterns for production
 
 MEMORY_MANAGER.with(|mm| {
     mktd02::init(&adapter, &mm.borrow(), MktdConfig {
         base_memory_id: 100,
         subnet_id: Principal::from_text("jtdsg-3h6gi-...").unwrap(),
-    }, module_hash);
+    });
 });
 ```
 

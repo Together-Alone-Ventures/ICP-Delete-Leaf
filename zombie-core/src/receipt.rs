@@ -95,8 +95,8 @@ mod tests {
         };
         let s = ReceiptSummary::from(&r);
         assert!(s.state_changed);
+        
     }
-
     #[test]
     fn receipt_summary_state_unchanged_when_equal() {
         let c = Principal::from_text("aaaaa-aa").unwrap();
@@ -111,5 +111,16 @@ mod tests {
         };
         let s = ReceiptSummary::from(&r);
         assert!(!s.state_changed);
+    }
+    #[test]
+    fn golden_receipt_id() {
+        // aaaaa-aa (management canister), nonce = 1
+        let c = Principal::from_text("aaaaa-aa").unwrap();
+        let id = compute_receipt_id(&c, 1);
+        assert_eq!(
+            hex::encode(id),
+            "10e9cc19646743d46a2dda9e535f7a8389635be0559a4980dca46c444661be02",
+            "receipt_id derivation changed — this breaks all existing receipts"
+        );
     }
 }

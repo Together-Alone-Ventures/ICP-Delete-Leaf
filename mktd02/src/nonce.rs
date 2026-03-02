@@ -22,7 +22,9 @@ use crate::storage::{with_storage_mut, StorableU64};
 pub(crate) fn increment_nonce() -> u64 {
     with_storage_mut(|s| {
         let current = s.nonce.get().0;
-        let next = current + 1;
+        let next = current
+            .checked_add(1)
+            .unwrap_or_else(|| ic_cdk::trap("MKTd02: nonce overflow; cannot issue additional receipts"));
         s.nonce
             .set(StorableU64(next))
             .expect("MKTd02: failed to persist nonce");

@@ -17,6 +17,7 @@ MKTd02 reserves 8 contiguous stable memory slots starting from a configurable ba
 
 - **Range check:** `base + 7` must be ≤ 255, else trap with descriptive error.
 - **Collision detection (belt-and-suspenders):** If meta cell has `schema_version ≠ 0`, `memory_base ≠ 0`, or `initialised_at` set, and `memory_base` differs from requested base, trap.
+- **Schema version gate:** On reconnect, if the stored `schema_version` does not match the expected version, trap with a descriptive error. This prevents silent data misinterpretation after layout changes. Downgrades are not supported.
 - **Salt derivation:** The `mktd_salt` used in hash computations is NOT stored in stable memory. It is deterministically derived at runtime: `SHA-256(MKTD02_SALT_V1 || canister_id_bytes)`.
 
 ### Upgrade behaviour

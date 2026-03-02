@@ -78,7 +78,7 @@ pub fn hash_with_tag(tag: DomainTag, parts: &[&[u8]]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-/// Compute SHA-256 of multiple byte slices concatenated in order.
+/// Compute SHA-256 of multiple byte slices concatenated in order
 ///
 /// **Prefer [`hash_with_tag`] for domain-separated hashes.** This
 /// function is for cases without a domain tag (e.g., salt || state_bytes).

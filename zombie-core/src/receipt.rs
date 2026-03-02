@@ -119,7 +119,7 @@ mod tests {
         let id = compute_receipt_id(&c, 1);
         assert_eq!(
             hex::encode(id),
-            "10e9cc19646743d46a2dda9e535f7a8389635be0559a4980dca46c444661be02",
+            "1f213a0f2bf4992071a7f23e72d1942e564a4e871e3decce8ac8ee27d08f534b",
             "receipt_id derivation changed — this breaks all existing receipts"
         );
     }

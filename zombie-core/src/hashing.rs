@@ -169,4 +169,67 @@ mod tests {
     fn zero_hash_is_zero() {
         assert_eq!(ZERO_HASH, [0u8; 32]);
     }
+    // ---------------------------------------------------------------
+    // Golden vectors — lock down exact hash outputs.
+    // Computed independently via Python hashlib. Any change here
+    // means the protocol has changed and all existing CVDRs break.
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn golden_tombstone_seed() {
+        let tombstone = sha256(TOMBSTONE_SEED);
+        assert_eq!(
+            hex::encode(tombstone),
+            "485a0cf91d7feb0f97f428df6328feca93788456a5b614b1bcedf6c4dc0e8d2a",
+            "tombstone constant changed — this breaks all existing tombstones"
+        );
+    }
+
+    #[test]
+    fn golden_tag_tombstone_hash() {
+        assert_eq!(
+            hex::encode(hash_with_tag(TAG_TOMBSTONE_HASH, &[b"test"])),
+            "1d458fe278607fd548c30148ffd8eb9fba8c132cc9b1ec5039b7c973ef3bd322"
+        );
+    }
+
+    #[test]
+    fn golden_tag_event() {
+        assert_eq!(
+            hex::encode(hash_with_tag(TAG_EVENT, &[b"test"])),
+            "6393c15cb2820d70e84c82c0928fccf15792cb3f79bb0783a78eb050260a977f"
+        );
+    }
+
+    #[test]
+    fn golden_tag_certified() {
+        assert_eq!(
+            hex::encode(hash_with_tag(TAG_CERTIFIED, &[b"test"])),
+            "b2a533ef0b75007545bda617076df5a8694db1e3f6ae0c3050b45b81d0cfcf5c"
+        );
+    }
+
+    #[test]
+    fn golden_tag_receipt() {
+        assert_eq!(
+            hex::encode(hash_with_tag(TAG_RECEIPT, &[b"test"])),
+            "b5acde122055eed7a27d1af0e0d6cf510b8afa1532c4383193587e3c57001b15"
+        );
+    }
+
+    #[test]
+    fn golden_tag_salt() {
+        assert_eq!(
+            hex::encode(hash_with_tag(TAG_SALT, &[b"test"])),
+            "59c364395836b540971fcc4021eaf977deaf174d6eb87b2da68b30e46df66b4a"
+        );
+    }
+
+    #[test]
+    fn golden_tag_manifest() {
+        assert_eq!(
+            hex::encode(hash_with_tag(TAG_MANIFEST, &[b"test"])),
+            "158e49fbae2d7356adccead6973a51722c587a935fdbda455592a1dbb8bc31f2"
+        );
+    }
 }

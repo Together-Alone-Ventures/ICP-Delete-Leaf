@@ -255,6 +255,18 @@ pub(crate) fn setup_storage(mm: &MemoryManager<DefaultMemoryImpl>, base: u8) {
         ));
     }
 
+    // Schema version gate: refuse to run against an unknown layout.
+    // Version 0 means fresh init (not yet written); that's fine.
+    // Current version matches: continue normally.
+    // Anything else: trap rather than silently misinterpret data.
+    if previously_initialised && existing.schema_version != SCHEMA_VERSION {
+        ic_cdk::trap(&format!(
+            "MKTd02: schema version mismatch — stored={}, expected={}. \
+             Downgrade is not supported; upgrade migration required.",
+            existing.schema_version, SCHEMA_VERSION
+        ));
+    }
+
     STORAGE.with(|s| {
         *s.borrow_mut() = Some(storage);
     });

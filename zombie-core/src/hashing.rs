@@ -232,4 +232,30 @@ mod tests {
             "158e49fbae2d7356adccead6973a51722c587a935fdbda455592a1dbb8bc31f2"
         );
     }
+    /// Golden vector for v0.2.0 deletion_event_hash formula.
+    /// Inputs: pre_state=[1;32], post_state=[2;32], timestamp=1_000_000,
+    /// module_hash=[3;32], nonce=1. Note: NO manifest_hash in preimage.
+    /// Computed independently via Python hashlib.
+    #[test]
+    fn golden_deletion_event_hash_v2() {
+        let pre_state = [1u8; 32];
+        let post_state = [2u8; 32];
+        let timestamp = 1_000_000u64.to_be_bytes();
+        let module_hash = [3u8; 32];
+        let nonce = 1u64.to_be_bytes();
+
+        let result = hash_with_tag(TAG_EVENT, &[
+            &pre_state,
+            &post_state,
+            &timestamp,
+            &module_hash,
+            &nonce,
+        ]);
+
+        assert_eq!(
+            hex::encode(result),
+            "9078d9a080606b46298bd9d66d3dd4a75389b04f7531b53a3a0e7c8f25955023",
+            "v0.2.0 deletion_event_hash formula changed — manifest_hash must NOT be in preimage"
+        );
+    }
 }

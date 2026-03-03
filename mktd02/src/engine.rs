@@ -3,6 +3,15 @@
 //! Domain tags: `MKTD02_TOMBSTONE_HASH_V1`, `MKTD02_EVENT_V1`
 //!
 //! Core deletion flow is synchronous within a single message.
+//!
+//! ## v0.2.0 Changes
+//!
+//! - `manifest_hash` removed from `deletion_event_hash` preimage
+//! - `commit_mode` removed from receipt (redundant for Leaf mode)
+//! - `protocol_version`, `bls_certificate`, `trust_root_key` added to receipt
+//! - `upgrade_cascade` no longer checks manifest changes (manifest_hash
+//!   removed from trait); always recomputes state_hash and republishes
+//!   certified_commitment as a defensive measure
 
 use crate::certified::publish_certified_commitment;
 use crate::nonce::increment_nonce;
@@ -13,7 +22,7 @@ use crate::storage::{
 use crate::trait_def::MKTdDataSource;
 use crate::MktdConfig;
 use zombie_core::hashing::{hash_with_tag, TAG_EVENT, TAG_TOMBSTONE_HASH, ZERO_HASH};
-use zombie_core::receipt::{compute_receipt_id, DeletionReceipt};
+use zombie_core::receipt::{compute_receipt_id, DeletionReceipt, ProtocolVersion};
 use zombie_core::tombstone::tombstone_constant;
 
 #[derive(Debug, Clone)]
@@ -32,6 +41,10 @@ impl core::fmt::Display for DeletionError {
 }
 
 /// Execute the full deletion flow. Returns the receipt_id on success.
+///
+/// The receipt is created with `bls_certificate: None` and
+/// `trust_root_key: vec![]`. These fields are populated during
+/// finalization (Phase 2 — see `mktd_finalize_receipt`).
 pub fn execute_deletion<A: MKTdDataSource>(
     adapter: &mut A,
     config: &MktdConfig,
@@ -72,18 +85,16 @@ pub fn execute_deletion<A: MKTdDataSource>(
         &nonce.to_be_bytes(),
     ]);
 
-    // (g) Read module_hash and manifest_hash from storage
-    let (module_hash, manifest_hash) = with_storage(|s| {
-        (s.meta.get().module_hash, s.manifest_hash.get().0)
-    });
+    // (g) Read module_hash from storage
+    let module_hash = with_storage(|s| s.meta.get().module_hash);
 
     // (h) Compute deletion_event_hash
+    //     v0.2.0: manifest_hash removed from preimage
     let deletion_event_hash = hash_with_tag(TAG_EVENT, &[
         &pre_state_hash,
         &post_state_hash,
         &timestamp.to_be_bytes(),
         &module_hash,
-        &manifest_hash,
         &nonce.to_be_bytes(),
     ]);
 
@@ -108,19 +119,20 @@ pub fn execute_deletion<A: MKTdDataSource>(
     let receipt_id = compute_receipt_id(&canister_id, nonce);
 
     let receipt = DeletionReceipt {
+        protocol_version: ProtocolVersion::V2.into(),
         receipt_id,
         canister_id,
         subnet_id: config.subnet_id,
-        commit_mode: adapter.mode().as_str().to_string(),
         pre_state_hash,
         post_state_hash,
         tombstone_hash,
         deletion_event_hash,
         certified_commitment,
-        manifest_hash,
         module_hash,
         timestamp,
         nonce,
+        bls_certificate: None,      // Populated during finalization (Phase C)
+        trust_root_key: vec![],      // Populated during finalization (Phase C)
     };
 
     // (l) Store receipt as CBOR in StableBTreeMap
@@ -136,32 +148,29 @@ pub fn execute_deletion<A: MKTdDataSource>(
     Ok(receipt_id)
 }
 
-/// Upgrade cascade: detect manifest changes, update module_hash.
+/// Upgrade cascade: recompute state hash and update module_hash.
+///
+/// v0.2.0: No longer checks manifest changes (manifest_hash removed from
+/// trait and receipt). Always recomputes state_hash and republishes
+/// certified_commitment as a defensive measure — if the adapter's
+/// get_state_bytes() implementation changed between upgrades, the
+/// state hash must reflect the new encoding.
 pub(crate) fn upgrade_cascade<A: MKTdDataSource>(
     adapter: &A,
     module_hash: [u8; 32],
 ) {
-    let new_manifest_hash = adapter.manifest_hash();
-    let stored_manifest_hash = with_storage(|s| s.manifest_hash.get().0);
+    // Always recompute state_hash (defensive — catches adapter changes)
+    let state_bytes = adapter.get_state_bytes();
+    let new_state_hash = compute_state_hash(&state_bytes);
+    with_storage_mut(|s| {
+        s.state_hash
+            .set(Hash32(new_state_hash))
+            .expect("MKTd02: failed to update state_hash in cascade");
+    });
 
-    if new_manifest_hash != stored_manifest_hash {
-        with_storage_mut(|s| {
-            s.manifest_hash
-                .set(Hash32(new_manifest_hash))
-                .expect("MKTd02: failed to update manifest_hash");
-        });
-
-        let state_bytes = adapter.get_state_bytes();
-        let new_state_hash = compute_state_hash(&state_bytes);
-        with_storage_mut(|s| {
-            s.state_hash
-                .set(Hash32(new_state_hash))
-                .expect("MKTd02: failed to update state_hash in cascade");
-        });
-
-        let existing_event_hash = with_storage(|s| s.deletion_event_hash.get().0);
-        publish_certified_commitment(&new_state_hash, &existing_event_hash);
-    }
+    // Always republish certified_commitment
+    let existing_event_hash = with_storage(|s| s.deletion_event_hash.get().0);
+    publish_certified_commitment(&new_state_hash, &existing_event_hash);
 
     // Update module_hash unconditionally
     with_storage_mut(|s| {
@@ -180,13 +189,6 @@ pub(crate) fn first_init<A: MKTdDataSource>(
     module_hash: [u8; 32],
 ) {
     let timestamp = ic_cdk::api::time();
-
-    let manifest_hash = adapter.manifest_hash();
-    with_storage_mut(|s| {
-        s.manifest_hash
-            .set(Hash32(manifest_hash))
-            .expect("MKTd02: failed to store manifest_hash");
-    });
 
     crate::state::init_state_hash(&adapter.get_state_bytes());
 

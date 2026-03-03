@@ -1,6 +1,11 @@
 //! # MKTdDataSource Trait & GuardError Trait
 //!
 //! The adapter trait that host canisters implement to integrate with MKTd02.
+//!
+//! ## v0.2.0 Changes
+//!
+//! - Removed `manifest_hash()` — PII boundary is now anchored by
+//!   module_hash → archived source code, not a dedicated manifest hash.
 
 use zombie_core::FieldDescriptor;
 
@@ -26,15 +31,17 @@ impl CommitMode {
 ///
 /// Each method maps to a specific aspect of the PII lifecycle:
 /// - `mode()`: Declares Leaf or Tree commit mode
-/// - `pii_field_manifest()`: Defines the PII boundary
-/// - `manifest_hash()`: Precomputed hash of the manifest
+/// - `pii_field_manifest()`: Defines the PII boundary (documentation obligation)
 /// - `get_state_bytes()`: Current PII state as deterministic CBOR bytes
 /// - `tombstone_state()`: Overwrites all PII fields with TOMBSTONE_CONSTANT
 /// - `is_tombstoned()`: Checks whether all PII fields are tombstoned
+///
+/// **v0.2.0 note:** `manifest_hash()` has been removed. The PII boundary
+/// is anchored by `module_hash` → archived source code → adapter implementation.
+/// Enterprises must publish a State Encoding Spec as a documentation obligation.
 pub trait MKTdDataSource {
     fn mode(&self) -> CommitMode;
     fn pii_field_manifest(&self) -> Vec<FieldDescriptor>;
-    fn manifest_hash(&self) -> [u8; 32];
 
     /// Return deterministic CBOR bytes of current PII state.
     /// **Must** use `zombie_core::encode_pii_state()`.

@@ -9,11 +9,16 @@
 //! | base+2  | nonce                | u64                                           |
 //! | base+3  | certified_commitment | [u8; 32]                                      |
 //! | base+4  | deletion_event_hash  | [u8; 32]                                      |
-//! | base+5  | manifest_hash        | [u8; 32]                                      |
+//! | base+5  | (reserved)           | Available for Phase 2 finalization_lock        |
 //! | base+6  | receipt store        | StableBTreeMap<[u8;32], Vec<u8>>              |
 //! | base+7  | tombstoned_at        | Option<u64>                                   |
 //!
 //! Range check on init: base + 7 <= 255, else trap.
+//!
+//! ## v0.2.0 Changes
+//!
+//! - Removed `manifest_hash` from slot base+5. Slot is reserved for
+//!   the finalization_lock in Phase 2.
 //!
 //! ## Endianness Convention
 //!
@@ -190,7 +195,7 @@ pub(crate) struct MktdStorage {
     pub nonce: StableCell<StorableU64, Memory>,
     pub certified_commitment: StableCell<Hash32, Memory>,
     pub deletion_event_hash: StableCell<Hash32, Memory>,
-    pub manifest_hash: StableCell<Hash32, Memory>,
+    // base+5: reserved for Phase 2 finalization_lock
     pub receipts: StableBTreeMap<Hash32, ReceiptBytes, Memory>,
     pub tombstoned_at: StableCell<OptionalTimestamp, Memory>,
 }
@@ -231,8 +236,7 @@ pub(crate) fn setup_storage(mm: &MemoryManager<DefaultMemoryImpl>, base: u8) {
             Hash32::default(),
         )
         .expect("MKTd02: failed to init deletion_event_hash cell"),
-        manifest_hash: StableCell::init(mm.get(MemoryId::new(base + 5)), Hash32::default())
-            .expect("MKTd02: failed to init manifest_hash cell"),
+        // base+5: reserved for Phase 2 finalization_lock (not initialised here)
         receipts: StableBTreeMap::init(mm.get(MemoryId::new(base + 6))),
         tombstoned_at: StableCell::init(
             mm.get(MemoryId::new(base + 7)),

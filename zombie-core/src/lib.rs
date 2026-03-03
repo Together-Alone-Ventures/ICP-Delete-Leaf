@@ -14,6 +14,6 @@ pub mod tombstone;
 
 pub use hashing::{sha256, sha256_concat, ZERO_HASH};
 pub use manifest::{compute_manifest_hash, FieldDescriptor};
-pub use receipt::{compute_receipt_id, DeletionReceipt, ReceiptSummary};
+pub use receipt::{compute_receipt_id, DeletionReceipt, ProtocolVersion, ReceiptSummary};
 pub use serialisation::{decode_pii_state, encode_pii_state, SerialisationError};
 pub use tombstone::{tombstone_constant, TOMBSTONE_CONSTANT};

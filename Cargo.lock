@@ -332,6 +332,7 @@ version = "0.1.0"
 dependencies = [
  "candid",
  "ciborium",
+ "hex",
  "ic-cdk",
  "ic-stable-structures",
  "serde",
@@ -706,10 +707,10 @@ checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
 [[package]]
 name = "zombie-core"
 version = "0.1.0"
+source = "git+https://github.com/Together-Alone-Ventures/zombie-core?rev=b5eed47870a12e89c6381df1ab69a7e77c541498#b5eed47870a12e89c6381df1ab69a7e77c541498"
 dependencies = [
  "candid",
  "ciborium",
- "hex",
  "serde",
  "sha2",
 ]

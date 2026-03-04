@@ -1,6 +1,5 @@
 [workspace]
 members = [
-    "zombie-core",
     "mktd02",
     "mktd02-macros",
 ]

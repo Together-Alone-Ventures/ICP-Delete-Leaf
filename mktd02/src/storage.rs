@@ -9,7 +9,7 @@
 //! | base+2  | nonce                | u64                                           |
 //! | base+3  | certified_commitment | [u8; 32]                                      |
 //! | base+4  | deletion_event_hash  | [u8; 32]                                      |
-//! | base+5  | (reserved)           | Available for Phase 2 finalization_lock        |
+//! | base+5  | finalization_lock    | bool (prevents certified_data drift)          |
 //! | base+6  | receipt store        | StableBTreeMap<[u8;32], Vec<u8>>              |
 //! | base+7  | tombstoned_at        | Option<u64>                                   |
 //!
@@ -17,8 +17,11 @@
 //!
 //! ## v0.2.0 Changes
 //!
-//! - Removed `manifest_hash` from slot base+5. Slot is reserved for
-//!   the finalization_lock in Phase 2.
+//! - Phase 1: Removed `manifest_hash` from slot base+5.
+//! - Phase 2: Repurposed base+5 for `finalization_lock` (bool).
+//!   When true, all code paths that call `certified_data_set()` trap.
+//!   This is a hard invariant that prevents certified data drift
+//!   between deletion (Phase A) and finalization (Phase C).
 //!
 //! ## Endianness Convention
 //!
@@ -135,6 +138,25 @@ impl Storable for StorableU64 {
     };
 }
 
+/// Bool wrapper for stable memory. 1 byte: 0 = false, 1 = true.
+///
+/// Used for the finalization lock at base+5.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct StorableBool(pub bool);
+
+impl Storable for StorableBool {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        Cow::Owned(vec![if self.0 { 1u8 } else { 0u8 }])
+    }
+    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
+        Self(bytes[0] == 1)
+    }
+    const BOUND: Bound = Bound::Bounded {
+        max_size: 1,
+        is_fixed_size: true,
+    };
+}
+
 /// Optional timestamp for tombstoned_at: 1 byte discriminant + 8 bytes u64 (LE).
 ///
 /// **This field is engine-owned.** Only `execute_deletion()` may set it.
@@ -195,7 +217,7 @@ pub(crate) struct MktdStorage {
     pub nonce: StableCell<StorableU64, Memory>,
     pub certified_commitment: StableCell<Hash32, Memory>,
     pub deletion_event_hash: StableCell<Hash32, Memory>,
-    // base+5: reserved for Phase 2 finalization_lock
+    pub finalization_lock: StableCell<StorableBool, Memory>,
     pub receipts: StableBTreeMap<Hash32, ReceiptBytes, Memory>,
     pub tombstoned_at: StableCell<OptionalTimestamp, Memory>,
 }
@@ -236,7 +258,11 @@ pub(crate) fn setup_storage(mm: &MemoryManager<DefaultMemoryImpl>, base: u8) {
             Hash32::default(),
         )
         .expect("MKTd02: failed to init deletion_event_hash cell"),
-        // base+5: reserved for Phase 2 finalization_lock (not initialised here)
+        finalization_lock: StableCell::init(
+            mm.get(MemoryId::new(base + 5)),
+            StorableBool::default(),
+        )
+        .expect("MKTd02: failed to init finalization_lock cell"),
         receipts: StableBTreeMap::init(mm.get(MemoryId::new(base + 6))),
         tombstoned_at: StableCell::init(
             mm.get(MemoryId::new(base + 7)),
@@ -260,9 +286,6 @@ pub(crate) fn setup_storage(mm: &MemoryManager<DefaultMemoryImpl>, base: u8) {
     }
 
     // Schema version gate: refuse to run against an unknown layout.
-    // Version 0 means fresh init (not yet written); that's fine.
-    // Current version matches: continue normally.
-    // Anything else: trap rather than silently misinterpret data.
     if previously_initialised && existing.schema_version != SCHEMA_VERSION {
         ic_cdk::trap(&format!(
             "MKTd02: schema version mismatch — stored={}, expected={}. \
@@ -305,4 +328,40 @@ pub(crate) fn storage_exists() -> bool {
 
 pub(crate) const fn schema_version() -> u32 {
     SCHEMA_VERSION
+}
+
+// ---------------------------------------------------------------------------
+// Finalization lock helpers
+// ---------------------------------------------------------------------------
+
+/// Check whether the finalization lock is held.
+///
+/// When true, a receipt is pending finalization and no code path
+/// may call `certified_data_set()`.
+pub(crate) fn is_finalization_locked() -> bool {
+    with_storage(|s| s.finalization_lock.get().0)
+}
+
+/// Acquire the finalization lock. Traps if already held.
+pub(crate) fn acquire_finalization_lock() {
+    if is_finalization_locked() {
+        ic_cdk::trap("MKTd02: finalization lock already held — finalize the pending receipt first");
+    }
+    with_storage_mut(|s| {
+        s.finalization_lock
+            .set(StorableBool(true))
+            .expect("MKTd02: failed to set finalization_lock");
+    });
+}
+
+/// Release the finalization lock. Traps if not held.
+pub(crate) fn release_finalization_lock() {
+    if !is_finalization_locked() {
+        ic_cdk::trap("MKTd02: finalization lock not held — nothing to release");
+    }
+    with_storage_mut(|s| {
+        s.finalization_lock
+            .set(StorableBool(false))
+            .expect("MKTd02: failed to release finalization_lock");
+    });
 }

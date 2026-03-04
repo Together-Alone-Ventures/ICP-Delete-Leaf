@@ -6,12 +6,12 @@
 //!
 //! ## v0.2.0 Changes
 //!
-//! - `manifest_hash` removed from `deletion_event_hash` preimage
-//! - `commit_mode` removed from receipt (redundant for Leaf mode)
-//! - `protocol_version`, `bls_certificate`, `trust_root_key` added to receipt
-//! - `upgrade_cascade` no longer checks manifest changes (manifest_hash
-//!   removed from trait); always recomputes state_hash and republishes
-//!   certified_commitment as a defensive measure
+//! - Phase 1: `manifest_hash` removed from `deletion_event_hash` preimage.
+//!   `commit_mode` removed from receipt. New fields added.
+//! - Phase 2: After publishing certified commitment, the finalization
+//!   lock is acquired. This prevents any code path from changing
+//!   certified data until the receipt is finalized via
+//!   `mktd_finalize_receipt()`.
 
 use crate::certified::publish_certified_commitment;
 use crate::nonce::increment_nonce;
@@ -40,11 +40,15 @@ impl core::fmt::Display for DeletionError {
     }
 }
 
-/// Execute the full deletion flow. Returns the receipt_id on success.
+/// Execute the full deletion flow (Phase A). Returns the receipt_id on success.
 ///
 /// The receipt is created with `bls_certificate: None` and
 /// `trust_root_key: vec![]`. These fields are populated during
-/// finalization (Phase 2 — see `mktd_finalize_receipt`).
+/// finalization (Phase C — see `finalize_receipt`).
+///
+/// After this call succeeds, the **finalization lock is held**. No
+/// code path may change certified data until `finalize_receipt()` is
+/// called. This is a hard invariant enforced in `publish_certified_commitment`.
 pub fn execute_deletion<A: MKTdDataSource>(
     adapter: &mut A,
     config: &MktdConfig,
@@ -112,8 +116,13 @@ pub fn execute_deletion<A: MKTdDataSource>(
     });
 
     // (j) Compute + publish certified_commitment
+    //     Note: finalization lock is NOT yet held, so this call succeeds.
     let certified_commitment =
         publish_certified_commitment(&post_state_hash, &deletion_event_hash);
+
+    // (j2) Acquire finalization lock — from this point, no code path
+    //      may call certified_data_set() until finalize_receipt() releases it.
+    crate::storage::acquire_finalization_lock();
 
     // (k) Compute receipt_id and construct receipt
     let receipt_id = compute_receipt_id(&canister_id, nonce);
@@ -150,11 +159,10 @@ pub fn execute_deletion<A: MKTdDataSource>(
 
 /// Upgrade cascade: recompute state hash and update module_hash.
 ///
-/// v0.2.0: No longer checks manifest changes (manifest_hash removed from
-/// trait and receipt). Always recomputes state_hash and republishes
-/// certified_commitment as a defensive measure — if the adapter's
-/// get_state_bytes() implementation changed between upgrades, the
-/// state hash must reflect the new encoding.
+/// v0.2.0: Always recomputes state_hash and republishes certified_commitment.
+/// If the finalization lock is held (receipt pending), the call to
+/// `publish_certified_commitment` will trap — this is intentional.
+/// You must finalize the pending receipt before upgrading.
 pub(crate) fn upgrade_cascade<A: MKTdDataSource>(
     adapter: &A,
     module_hash: [u8; 32],
@@ -169,6 +177,7 @@ pub(crate) fn upgrade_cascade<A: MKTdDataSource>(
     });
 
     // Always republish certified_commitment
+    // (Will trap if finalization lock is held — see certified.rs)
     let existing_event_hash = with_storage(|s| s.deletion_event_hash.get().0);
     publish_certified_commitment(&new_state_hash, &existing_event_hash);
 

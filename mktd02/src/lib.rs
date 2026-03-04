@@ -1,19 +1,250 @@
-//! # zombie-core
+//! # MKTd02 -- Leaf-Mode CVDR Engine
 //!
-//! Shared types, hashing primitives, and receipt structures for the
-//! Zombie Delete CVDR (Cryptographically Verifiable Deletion Receipt) system.
+//! A composable Rust library that any ICP canister can import to produce
+//! CVDRs (Cryptographically Verifiable Deletion Receipts) for GDPR
+//! right-to-erasure compliance.
 //!
-//! This crate is **pure Rust** with zero ICP dependencies. It compiles and
-//! tests on native targets (`cargo test -p zombie-core`).
+//! ## Quick Start
+//!
+//! 1. Implement `MKTdDataSource` for your canister's data layer
+//! 2. Call `mktd02::init()` in `#[init]` or first `post_upgrade`
+//! 3. Call `mktd02::on_post_upgrade()` in every `#[post_upgrade]`
+//! 4. Guard PII-mutating functions with `#[mktd_guard]` or `assert_can_write()`
+//! 5. Call `mktd02::refresh_state_hash()` after each PII mutation
+//! 6. Call `mktd02::execute_deletion()` to tombstone and generate a CVDR
+//! 7. Call `mktd02::get_pending_certificate()` in a query to capture the BLS cert
+//! 8. Call `mktd02::finalize_receipt()` to embed the certificate in the receipt
 
-pub mod hashing;
-pub mod manifest;
-pub mod receipt;
-pub mod serialisation;
-pub mod tombstone;
+pub mod certified;
+pub mod engine;
+pub mod export;
+pub mod finalization;
+pub mod guard;
+pub mod nonce;
+pub mod state;
+pub mod storage;
+pub mod trait_def;
 
-pub use hashing::{sha256, sha256_concat, ZERO_HASH};
-pub use manifest::{compute_manifest_hash, FieldDescriptor};
-pub use receipt::{compute_receipt_id, DeletionReceipt, ProtocolVersion, ReceiptSummary};
-pub use serialisation::{decode_pii_state, encode_pii_state, SerialisationError};
-pub use tombstone::{tombstone_constant, TOMBSTONE_CONSTANT};
+// --- Re-exports ---
+pub use engine::DeletionError;
+pub use finalization::{FinalizationError, PendingCertificate};
+pub use trait_def::{CommitMode, GuardError, MKTdDataSource};
+pub use zombie_core::{DeletionReceipt, FieldDescriptor, ProtocolVersion, ReceiptSummary};
+
+use candid::Principal;
+use ic_stable_structures::memory_manager::MemoryManager;
+use ic_stable_structures::DefaultMemoryImpl;
+use storage::Hash32;
+
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+
+/// Configuration for MKTd02 initialisation.
+pub struct MktdConfig {
+    /// Base MemoryId for MKTd02's 8 stable memory slots (default: 100).
+    /// Range: base + 7 must be <= 255.
+    pub base_memory_id: u8,
+    /// Subnet ID for receipt construction.
+    pub subnet_id: Principal,
+}
+
+impl Default for MktdConfig {
+    fn default() -> Self {
+        Self {
+            base_memory_id: 100,
+            subnet_id: Principal::anonymous(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public API — Lifecycle
+// ---------------------------------------------------------------------------
+
+/// First-time initialisation. Call from `#[init]`.
+///
+/// Sets up stable memory, computes initial state hash, publishes
+/// certified commitment. Module hash is provided by the deployer
+/// (see Module Hash: Deployment Patterns in the Integration Guide).
+pub fn init<A: MKTdDataSource>(
+    adapter: &A,
+    memory_manager: &MemoryManager<DefaultMemoryImpl>,
+    config: MktdConfig,
+    module_hash: [u8; 32],
+) {
+    storage::setup_storage(memory_manager, config.base_memory_id);
+    if guard::is_initialised() {
+        return;
+    }
+    engine::first_init(adapter, &config, module_hash);
+}
+
+/// Post-upgrade handler. Call from `#[post_upgrade]`.
+///
+/// Reconnects to stable memory, recomputes state hash, updates
+/// module_hash unconditionally.
+///
+/// **If the finalization lock is held** (a receipt is pending
+/// finalization), the upgrade will trap. Finalize the pending receipt
+/// before upgrading.
+pub fn on_post_upgrade<A: MKTdDataSource>(
+    adapter: &A,
+    memory_manager: &MemoryManager<DefaultMemoryImpl>,
+    config: MktdConfig,
+    module_hash: [u8; 32],
+) {
+    storage::setup_storage(memory_manager, config.base_memory_id);
+
+    // If not yet initialised (upgrade that adds MKTd02), run first_init.
+    if !guard::is_initialised() {
+        engine::first_init(adapter, &config, module_hash);
+    }
+
+    engine::upgrade_cascade(adapter, module_hash);
+}
+
+// ---------------------------------------------------------------------------
+// Public API — Deletion (Phase A)
+// ---------------------------------------------------------------------------
+
+/// Execute deletion: tombstone PII and generate a CVDR (Phase A).
+///
+/// Returns the 32-byte receipt_id on success. The receipt is in
+/// **pending** state (bls_certificate = None). Call
+/// `get_pending_certificate()` then `finalize_receipt()` to complete
+/// the three-phase flow.
+///
+/// After this call, the **finalization lock is held** — no upgrades,
+/// state hash refreshes, or other certified data changes are permitted
+/// until the receipt is finalized.
+pub fn execute_deletion<A: MKTdDataSource>(
+    adapter: &mut A,
+    config: &MktdConfig,
+) -> Result<[u8; 32], DeletionError> {
+    engine::execute_deletion(adapter, config)
+}
+
+// ---------------------------------------------------------------------------
+// Public API — Certificate Retrieval (Phase B)
+// ---------------------------------------------------------------------------
+
+/// Retrieve the BLS certificate for the pending receipt (Phase B).
+///
+/// **Must be called from a query endpoint.** `ic0.data_certificate()`
+/// is only available in query context.
+///
+/// Returns `None` if:
+/// - No receipt is pending finalization
+/// - The IC runtime does not provide a certificate
+///
+/// The orchestrator passes `PendingCertificate.certificate` and the
+/// NNS root key to `finalize_receipt()`.
+pub fn get_pending_certificate() -> Option<PendingCertificate> {
+    finalization::get_pending_certificate()
+}
+
+// ---------------------------------------------------------------------------
+// Public API — Finalization (Phase C)
+// ---------------------------------------------------------------------------
+
+/// Embed BLS certificate and NNS root key in the pending receipt (Phase C).
+///
+/// ## Parameters
+///
+/// - `receipt_id`: The 32-byte receipt ID (from Phase B)
+/// - `certificate`: The BLS certificate blob (from Phase B)
+/// - `trust_root_key`: The NNS root public key (96 bytes for mainnet).
+///   The orchestrator provides this from its own configuration.
+///
+/// ## Guards
+///
+/// - Finalization lock must be held
+/// - Receipt ID must match the pending receipt
+/// - Receipt must not already be finalized
+/// - Caller must be a controller
+///
+/// On success, the receipt is fully self-contained for offline V2
+/// verification and the finalization lock is released.
+pub fn finalize_receipt(
+    receipt_id: &[u8; 32],
+    certificate: Vec<u8>,
+    trust_root_key: Vec<u8>,
+) -> Result<(), FinalizationError> {
+    finalization::finalize_receipt(receipt_id, certificate, trust_root_key)
+}
+
+/// Check whether a receipt is pending finalization.
+pub fn is_pending_finalization() -> bool {
+    finalization::is_pending_finalization()
+}
+
+// ---------------------------------------------------------------------------
+// Public API — Queries & State
+// ---------------------------------------------------------------------------
+
+/// Check whether the canister is tombstoned.
+pub fn is_tombstoned() -> bool {
+    guard::is_tombstoned()
+}
+
+/// Check whether MKTd02 has been initialised.
+pub fn is_initialised() -> bool {
+    guard::is_initialised()
+}
+
+/// Get the current state hash.
+pub fn get_state_hash() -> [u8; 32] {
+    state::read_state_hash()
+}
+
+/// Get state hash with optional ICP certificate (for certified queries).
+pub fn get_certified_state_hash() -> ([u8; 32], Option<Vec<u8>>) {
+    certified::get_certified_state_hash()
+}
+
+/// Retrieve a stored receipt by ID.
+pub fn get_receipt(receipt_id: &[u8; 32]) -> Option<DeletionReceipt> {
+    storage::with_storage(|s| {
+        s.receipts.get(&Hash32(*receipt_id)).and_then(|bytes| {
+            ciborium::from_reader(bytes.0.as_slice()).ok()
+        })
+    })
+}
+
+/// Retrieve a lightweight receipt summary by ID.
+pub fn get_receipt_summary(receipt_id: &[u8; 32]) -> Option<ReceiptSummary> {
+    get_receipt(receipt_id).map(|r| ReceiptSummary::from(&r))
+}
+
+/// Get tombstone status (timestamp if tombstoned).
+pub fn get_tombstone_status() -> Option<u64> {
+    storage::with_storage(|s| s.tombstoned_at.get().0)
+}
+
+/// Recompute state hash after a PII mutation.
+///
+/// Call this after every write to PII fields (e.g., after upsert_profile).
+///
+/// **Traps if finalization lock is held** — no state changes are
+/// permitted while a receipt is pending finalization.
+pub fn refresh_state_hash<A: MKTdDataSource>(adapter: &A) {
+    state::refresh_state_hash_internal(&adapter.get_state_bytes());
+
+    // Re-publish certified commitment with updated state_hash
+    // (Will trap if finalization lock is held — see certified.rs)
+    let new_state_hash = state::read_state_hash();
+    let existing_event_hash =
+        storage::with_storage(|s| s.deletion_event_hash.get().0);
+    certified::publish_certified_commitment(&new_state_hash, &existing_event_hash);
+}
+
+/// Get the number of stored receipts.
+pub fn receipt_count() -> u64 {
+    storage::with_storage(|s| s.receipts.len())
+}
+
+/// Trap if not initialised or tombstoned. For non-Result functions.
+pub fn assert_can_write() {
+    guard::assert_can_write();
+}

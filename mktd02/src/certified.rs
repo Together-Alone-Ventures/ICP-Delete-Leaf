@@ -3,6 +3,14 @@
 //! Domain tag: `MKTD02_CERTIFIED_V1`
 //!
 //! certified_commitment = SHA-256(MKTD02_CERTIFIED_V1 || post_state_hash || deletion_event_hash)
+//!
+//! ## v0.2.0 Changes (Phase 2)
+//!
+//! `publish_certified_commitment` now checks the finalization lock.
+//! If a receipt is pending finalization (lock held), any attempt to
+//! change certified data traps. This is a hard invariant — the BLS
+//! certificate captured in Phase B must match the certified data
+//! published in Phase A.
 
 use crate::storage::{with_storage, with_storage_mut, Hash32};
 use zombie_core::hashing::{hash_with_tag, TAG_CERTIFIED};
@@ -16,10 +24,24 @@ pub(crate) fn compute_certified_commitment(
 }
 
 /// Compute, store, and publish the certified commitment.
+///
+/// **Finalization lock guard:** If the finalization lock is held
+/// (a receipt is pending finalization), this function traps.
+/// The lock prevents certified data drift between Phase A
+/// (deletion) and Phase C (finalization).
 pub(crate) fn publish_certified_commitment(
     state_hash: &[u8; 32],
     deletion_event_hash: &[u8; 32],
 ) -> [u8; 32] {
+    // Finalization lock guard — hard invariant
+    if crate::storage::is_finalization_locked() {
+        ic_cdk::trap(
+            "MKTd02: cannot change certified data while finalization lock is held. \
+             Finalize the pending receipt before upgrading, refreshing state, \
+             or performing any action that changes certified data."
+        );
+    }
+
     let commitment = compute_certified_commitment(state_hash, deletion_event_hash);
     with_storage_mut(|s| {
         s.certified_commitment

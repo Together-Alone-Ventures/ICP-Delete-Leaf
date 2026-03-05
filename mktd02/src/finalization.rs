@@ -1,8 +1,8 @@
 //! # Receipt Finalization (Phase B + Phase C)
 //!
 //! Implements the two post-deletion steps that embed the BLS certificate
-//! and NNS root key into a pending receipt, making it self-contained
-//! for offline V2 verification.
+//! and NNS root key identifier into a pending receipt, making it
+//! self-contained for offline V2 verification.
 //!
 //! ## Three-Phase Deletion Flow
 //!
@@ -12,26 +12,33 @@
 //! |       |           | publish certified data, acquire finalization lock    |
 //! | B     | query     | `get_pending_certificate()` — read BLS certificate  |
 //! |       |           | from IC runtime (only available in query context)    |
-//! | C     | update    | `finalize_receipt()` — embed certificate + root key |
+//! | C     | update    | `finalize_receipt()` — embed certificate + key ID   |
 //! |       |           | in receipt, release finalization lock                |
 //!
-//! ## Orchestration
+//! ## trust_root_key_id
 //!
-//! The library provides the three functions. How they are called is up
-//! to the integrator:
+//! The library stamps the receipt with `zombie_core::nns_keys::active_key_id()`
+//! automatically during finalization. Integrators do not supply the key ID —
+//! it is determined by the build configuration (mainnet vs local-dev).
+//! This eliminates the risk of an integrator supplying a wrong or fabricated key.
 //!
-//! - **Factory pattern** (recommended for multi-canister apps):
-//!   The factory makes three inter-canister calls in sequence.
-//! - **Script pattern** (simplest for testing / single-canister):
-//!   A shell or JS script runs three `dfx` calls in sequence.
-//! - **Timer pattern** (self-contained canister):
-//!   The canister schedules a self-call timer after Phase A.
+//! ## Nonce Invariant
 //!
-//! See the Integration Guide for example orchestration code.
+//! Phase B and Phase C both derive the pending receipt_id from
+//! (canister_id, current_nonce()). This is correct only while the
+//! finalization lock is held — the lock is acquired in Phase A and
+//! released at the end of Phase C. No code path must advance the nonce
+//! while the lock is held.
+//!
+//! HARDENING TODO: store the pending receipt_id in a dedicated stable-memory
+//! cell during Phase A, and read it here rather than recomputing. This removes
+//! any risk if an integrator accidentally increments the nonce between phases.
+//! Tracked as a follow-up to Change A.
 
 use crate::certified::read_certified_commitment;
 use crate::nonce::current_nonce;
 use crate::storage::{with_storage, with_storage_mut, Hash32, ReceiptBytes};
+use zombie_core::nns_keys;
 use zombie_core::receipt::{compute_receipt_id, DeletionReceipt};
 
 // ---------------------------------------------------------------------------
@@ -109,15 +116,22 @@ pub struct PendingCertificate {
 /// only available in query calls. Returns `None` if no receipt is
 /// pending or if the IC runtime does not provide a certificate.
 ///
-/// The orchestrator should pass `certificate` and the NNS root key
-/// to `finalize_receipt()` in Phase C.
+/// The orchestrator passes `certificate` to `finalize_receipt()` in Phase C.
+/// The NNS root key ID is determined automatically by the library.
+///
+/// ## Nonce safety
+///
+/// receipt_id is derived from (canister_id, current_nonce()). This is safe
+/// because the finalization lock — checked first — guarantees no other
+/// deletion (which would advance the nonce) can run concurrently.
 pub fn get_pending_certificate() -> Option<PendingCertificate> {
-    // Check finalization lock
+    // Check finalization lock — SAFETY: nonce must not change while lock is held
     if !crate::storage::is_finalization_locked() {
         return None;
     }
 
-    // Compute the pending receipt_id from canister_id + current nonce
+    // Derive pending receipt_id from canister_id + current nonce.
+    // Correct only while finalization lock is held (see module-level note).
     let canister_id = ic_cdk::id();
     let nonce = current_nonce();
     let receipt_id = compute_receipt_id(&canister_id, nonce);
@@ -140,7 +154,7 @@ pub fn get_pending_certificate() -> Option<PendingCertificate> {
 // Phase C: Finalize receipt (update context)
 // ---------------------------------------------------------------------------
 
-/// Phase C: Embed the BLS certificate and NNS root key into the pending receipt.
+/// Phase C: Embed the BLS certificate and NNS root key ID into the pending receipt.
 ///
 /// ## Guards
 ///
@@ -153,19 +167,24 @@ pub fn get_pending_certificate() -> Option<PendingCertificate> {
 ///
 /// - `receipt_id`: The 32-byte receipt ID (from Phase B response)
 /// - `certificate`: The BLS certificate blob (from Phase B response)
-/// - `trust_root_key`: The NNS root public key (96 bytes for mainnet).
-///   The orchestrator provides this from configuration — it is NOT
-///   extracted from the certificate by the library.
 ///
-/// On success, the receipt's `bls_certificate` and `trust_root_key`
-/// fields are populated and the finalization lock is released. The
-/// receipt is now self-contained for offline V2 verification.
+/// The NNS root key ID is determined automatically from the build
+/// configuration via `zombie_core::nns_keys::active_key_id()`. Integrators
+/// do not supply it — this prevents key ID mismatches and fabrication.
+///
+/// On success, the receipt's `bls_certificate` and `trust_root_key_id`
+/// fields are populated and the finalization lock is released.
+///
+/// ## Nonce safety
+///
+/// expected_id is derived from (canister_id, current_nonce()). Correct only
+/// while finalization lock is held — no path must advance the nonce between
+/// Phase A and Phase C. See module-level HARDENING TODO.
 pub fn finalize_receipt(
     receipt_id: &[u8; 32],
     certificate: Vec<u8>,
-    trust_root_key: Vec<u8>,
 ) -> Result<(), FinalizationError> {
-    // Guard 1: finalization lock must be held
+    // Guard 1: finalization lock must be held — SAFETY: nonce stable while locked
     if !crate::storage::is_finalization_locked() {
         return Err(FinalizationError::NoPendingReceipt);
     }
@@ -176,7 +195,8 @@ pub fn finalize_receipt(
         return Err(FinalizationError::NotController);
     }
 
-    // Compute expected receipt_id from canister_id + current nonce
+    // Derive expected receipt_id from canister_id + current nonce.
+    // Safe: finalization lock ensures nonce has not advanced since Phase A.
     let canister_id = ic_cdk::id();
     let nonce = current_nonce();
     let expected_id = compute_receipt_id(&canister_id, nonce);
@@ -209,9 +229,9 @@ pub fn finalize_receipt(
         return Err(FinalizationError::AlreadyFinalized);
     }
 
-    // Embed certificate and root key
+    // Embed certificate and root key ID
     receipt.bls_certificate = Some(certificate);
-    receipt.trust_root_key = trust_root_key;
+    receipt.trust_root_key_id = nns_keys::active_key_id().to_string();
 
     // Re-encode and store
     let mut cbor_buf = Vec::new();

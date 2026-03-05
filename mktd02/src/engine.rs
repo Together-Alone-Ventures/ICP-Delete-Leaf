@@ -43,7 +43,7 @@ impl core::fmt::Display for DeletionError {
 /// Execute the full deletion flow (Phase A). Returns the receipt_id on success.
 ///
 /// The receipt is created with `bls_certificate: None` and
-/// `trust_root_key: vec![]`. These fields are populated during
+/// `trust_root_key_id: String::new()`. These fields are populated during
 /// finalization (Phase C — see `finalize_receipt`).
 ///
 /// After this call succeeds, the **finalization lock is held**. No
@@ -141,7 +141,7 @@ pub fn execute_deletion<A: MKTdDataSource>(
         timestamp,
         nonce,
         bls_certificate: None,      // Populated during finalization (Phase C)
-        trust_root_key: vec![],      // Populated during finalization (Phase C)
+        trust_root_key_id: String::new(),      // Populated during finalization (Phase C)
     };
 
     // (l) Store receipt as CBOR in StableBTreeMap

@@ -169,9 +169,8 @@ pub fn get_pending_certificate() -> Option<PendingCertificate> {
 pub fn finalize_receipt(
     receipt_id: &[u8; 32],
     certificate: Vec<u8>,
-    trust_root_key: Vec<u8>,
 ) -> Result<(), FinalizationError> {
-    finalization::finalize_receipt(receipt_id, certificate, trust_root_key)
+    finalization::finalize_receipt(receipt_id, certificate)
 }
 
 /// Check whether a receipt is pending finalization.

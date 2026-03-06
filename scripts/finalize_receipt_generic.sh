@@ -1,158 +1,311 @@
 #!/usr/bin/env bash
 # =============================================================================
-# finalize_receipt_generic.sh — MKTd02 Receipt Finalization Recovery Tool (Phases B + C)
+# finalize_receipt_generic.sh — Generic MKTd02 Recovery Tool (Phases B + C)
 #
 # Purpose:
-#   Recovery tool for the failure case where Phase A completed (Pending receipt)
-#   but Phase B/C did not. This is NOT the normal user flow; normal flow is
-#   frontend orchestration (A→B→C) with recovery-on-load.
+#   Recover/finalize a pending MKTd02 receipt after Phase A succeeded but
+#   certificate capture / finalization did not complete.
 #
-# Modes:
-#   1) --factory-canister <id> : calls finalize_profile_receipt on a controller proxy (DaffyDefs-style)
-#   2) --direct               : calls mktd_finalize_receipt directly on the profile canister (requires controller identity)
-#
-# Usage:
-#   ./scripts/finalize_receipt_generic.sh --profile <profile_canister_id> [--network local|ic] \
-#       [--factory-canister <factory_id>] [--direct] [--identity <dfx_identity>]
+# Supports:
+#   --factory-canister <id>   Finalize via factory proxy
+#   --direct                  Finalize directly on the profile canister
 #
 # Examples:
-#   # DaffyDefs-style (factory proxy):
-#   ./scripts/finalize_receipt_generic.sh --profile be2us-... --factory-canister br5f7-... --network local
+#   ./scripts/finalize_receipt_generic.sh \
+#     --profile ichn3-7qaaa-aaaaj-qqsya-cai \
+#     --factory-canister 5g26e-liaaa-aaaaj-qp4tq-cai \
+#     --network ic
 #
-#   # Direct finalize (controller identity required):
-#   ./scripts/finalize_receipt_generic.sh --profile <id> --direct --identity <controller_identity> --network ic
-#
-# Requirements:
-#   - dfx CLI
-#   - python3 (parses dfx JSON output)
+#   ./scripts/finalize_receipt_generic.sh \
+#     --profile be2us-64aaa-aaaaa-qaabq-cai \
+#     --direct \
+#     --network local
 # =============================================================================
 set -euo pipefail
 
-NETWORK="local"
 PROFILE=""
 FACTORY=""
-MODE="factory"   # factory | direct
+NETWORK="local"
 IDENTITY=""
-
-die() { echo "ERROR: $*" >&2; exit 1; }
+MODE=""
 
 usage() {
-  cat <<EOF
+  cat <<'EOF'
 Usage:
-  $0 --profile <profile_canister_id> [--network local|ic] [--factory-canister <id> | --direct] [--identity <dfx_identity>]
+  finalize_receipt_generic.sh --profile <canister_id> [--factory-canister <id> | --direct] [--network <name>] [--identity <name>]
 
-Options:
-  --profile <id>           Profile canister id (required)
-  --network <net>          dfx network name (default: local)
-  --factory-canister <id>  Factory/controller-proxy canister id (Phase C via finalize_profile_receipt)
-  --direct                 Call mktd_finalize_receipt directly on profile canister (requires controller identity)
-  --identity <name>        dfx identity to use (optional; recommended for --direct)
-  -h, --help               Show help
+Required:
+  --profile <canister_id>        Profile canister id
 
+Mode (choose one):
+  --factory-canister <id>        Finalize via factory proxy
+  --direct                       Finalize directly on the profile canister
+
+Optional:
+  --network <name>               DFX network name (default: local)
+  --identity <name>              DFX identity to use
+  --help                         Show this help
 EOF
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --profile) PROFILE="${2:-}"; shift 2;;
-    --network) NETWORK="${2:-}"; shift 2;;
-    --factory-canister) FACTORY="${2:-}"; MODE="factory"; shift 2;;
-    --direct) MODE="direct"; shift 1;;
-    --identity) IDENTITY="${2:-}"; shift 2;;
-    -h|--help) usage; exit 0;;
-    *) die "Unknown argument: $1";;
+    --profile)
+      PROFILE="${2:-}"
+      shift 2
+      ;;
+    --factory-canister)
+      FACTORY="${2:-}"
+      MODE="factory"
+      shift 2
+      ;;
+    --direct)
+      MODE="direct"
+      shift
+      ;;
+    --network)
+      NETWORK="${2:-}"
+      shift 2
+      ;;
+    --identity)
+      IDENTITY="${2:-}"
+      shift 2
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "ERROR: Unknown argument: $1" >&2
+      usage >&2
+      exit 1
+      ;;
   esac
 done
 
-[[ -n "$PROFILE" ]] || die "--profile is required"
-if [[ "$MODE" == "factory" && -z "$FACTORY" ]]; then
-  die "Factory mode requires --factory-canister <id> (or use --direct)"
+if [[ -z "$PROFILE" ]]; then
+  echo "ERROR: --profile is required" >&2
+  usage >&2
+  exit 1
 fi
 
-DFX=(dfx --network "$NETWORK")
+if [[ -z "$MODE" ]]; then
+  echo "ERROR: choose either --factory-canister <id> or --direct" >&2
+  usage >&2
+  exit 1
+fi
+
+if [[ "$MODE" == "factory" && -z "$FACTORY" ]]; then
+  echo "ERROR: --factory-canister is required in factory mode" >&2
+  exit 1
+fi
+
+DFX=(dfx)
+
 if [[ -n "$IDENTITY" ]]; then
+  echo "[*] Switching identity: $IDENTITY"
   "${DFX[@]}" identity use "$IDENTITY" >/dev/null
 fi
 
 echo "[*] Network: $NETWORK"
 echo "[*] Profile canister: $PROFILE"
 echo "[*] Mode: $MODE"
-[[ -n "$FACTORY" ]] && echo "[*] Factory canister: $FACTORY"
-[[ -n "$IDENTITY" ]] && echo "[*] Identity: $IDENTITY"
+if [[ "$MODE" == "factory" ]]; then
+  echo "[*] Factory canister: $FACTORY"
+fi
 
 echo "[*] Checking pending state..."
-PENDING=$("${DFX[@]}" canister call "$PROFILE" mktd_is_pending --output json \
-  | python3 - <<'PY'
-import json,sys
-d=json.load(sys.stdin)
-# dfx json output often wraps as {"Ok":...} or raw bool; handle both
-if isinstance(d, bool): print("true" if d else "false")
-elif isinstance(d, dict):
-    # Some canisters may return bool directly; but handle candid json encoding
-    # Example: {"Ok": true}
-    v=list(d.values())[0] if d else False
-    print("true" if v else "false")
+PENDING_JSON=$("${DFX[@]}" canister call "$PROFILE" mktd_is_pending --output json --query --network "$NETWORK")
+
+python3 - "$PENDING_JSON" <<'PY'
+import json, sys
+raw = sys.argv[1]
+try:
+    data = json.loads(raw)
+except Exception as e:
+    print(f"ERROR: could not parse mktd_is_pending JSON: {e}", file=sys.stderr)
+    print(raw, file=sys.stderr)
+    sys.exit(2)
+
+def extract_bool(x):
+    if isinstance(x, bool):
+        return x
+    if isinstance(x, list) and len(x) == 1:
+        return extract_bool(x[0])
+    if isinstance(x, dict):
+        if "Ok" in x:
+            return extract_bool(x["Ok"])
+        if "ok" in x:
+            return extract_bool(x["ok"])
+    raise ValueError(f"unexpected shape: {x!r}")
+
+try:
+    pending = extract_bool(data)
+except Exception as e:
+    print(f"ERROR: could not extract pending flag: {e}", file=sys.stderr)
+    print(data, file=sys.stderr)
+    sys.exit(3)
+
+if not pending:
+    print("[*] No pending receipt found. Nothing to finalize.")
+    sys.exit(10)
+
+print("[*] Pending receipt detected.")
+PY
+
+status=$?
+if [[ $status -eq 10 ]]; then
+  exit 0
+elif [[ $status -ne 0 ]]; then
+  exit $status
+fi
+
+echo "[*] Fetching certificate..."
+CERT_JSON=$("${DFX[@]}" canister call "$PROFILE" mktd_get_certificate --output json --query --network "$NETWORK")
+
+PARSED=$(python3 - "$CERT_JSON" <<'PY'
+import json, sys
+raw = sys.argv[1]
+try:
+    data = json.loads(raw)
+except Exception as e:
+    print(f"ERROR: could not parse mktd_get_certificate JSON: {e}", file=sys.stderr)
+    print(raw, file=sys.stderr)
+    sys.exit(2)
+
+def walk(x):
+    if isinstance(x, dict):
+        if "Ok" in x:
+            return walk(x["Ok"])
+        if "ok" in x:
+            return walk(x["ok"])
+        if "Err" in x or "err" in x:
+            raise ValueError(f"certificate call returned error: {x!r}")
+
+        # Friendly-field candidate record
+        rid_keys = ["receipt_id", "receiptId", "640_735_298"]
+        cert_keys = ["certificate", "bls_certificate", "cert", "457_361_687"]
+
+        rid = None
+        cert = None
+        for k in rid_keys:
+            if k in x:
+                rid = x[k]
+                break
+        for k in cert_keys:
+            if k in x:
+                cert = x[k]
+                break
+
+        if rid is not None and cert is not None:
+            return rid, cert
+
+        for v in x.values():
+            try:
+                return walk(v)
+            except Exception:
+                pass
+
+    elif isinstance(x, list):
+        for item in x:
+            try:
+                return walk(item)
+            except Exception:
+                pass
+
+    raise ValueError(f"could not locate receipt_id/certificate in: {x!r}")
+
+receipt_id, cert = walk(data)
+
+if not isinstance(receipt_id, str) or not receipt_id:
+    raise ValueError(f"invalid receipt_id: {receipt_id!r}")
+
+# cert may arrive as list[int] or hex/text depending on candid/json rendering
+if isinstance(cert, list):
+    cert_len = len(cert)
+    cert_arg = "vec {" + "; ".join(str(int(b)) for b in cert) + "}"
+elif isinstance(cert, str):
+    # keep as raw text for diagnostics; reject empty
+    cert_len = len(cert)
+    if cert_len == 0:
+      raise ValueError("empty certificate string")
+    # If somehow encoded as hex/text, direct canister-call blob syntax won't accept it.
+    # Emit a marker so the shell can stop with a useful error.
+    cert_arg = "__STRING_CERT__:" + cert
 else:
-    print("false")
+    raise ValueError(f"unexpected certificate shape: {type(cert).__name__}: {cert!r}")
+
+print(receipt_id)
+print(cert_len)
+print(cert_arg)
 PY
 )
 
-if [[ "$PENDING" != "true" ]]; then
-  echo "[✓] No pending receipt. Nothing to finalize."
-  exit 0
+RECEIPT_ID=$(printf '%s\n' "$PARSED" | sed -n '1p')
+CERT_LEN=$(printf '%s\n' "$PARSED" | sed -n '2p')
+CERT_ARG=$(printf '%s\n' "$PARSED" | sed -n '3p')
+
+if [[ "$CERT_ARG" == __STRING_CERT__:* ]]; then
+  echo "ERROR: mktd_get_certificate returned certificate as string text, not byte vector." >&2
+  echo "Raw marker: $CERT_ARG" >&2
+  exit 4
 fi
 
-echo "[*] Phase B: fetching certificate via mktd_get_certificate()..."
-CERT_JSON=$("${DFX[@]}" canister call "$PROFILE" mktd_get_certificate --output json)
-# Parse receipt_id and certificate bytes
-read -r RECEIPT_ID CERT_VEC <<<"$(python3 - <<'PY'
-import json,sys
-d=json.loads(sys.argv[1])
-# Expect opt record => either null or {"Some": {"receipt_id": "...", "certificate": [...], ...}}
-if d is None:
-    print("", "")
-    sys.exit(0)
-if isinstance(d, dict) and "Some" in d:
-    rec=d["Some"]
-    rid=rec.get("receipt_id","")
-    cert=rec.get("certificate",[])
-    # cert may be list of ints; output as "vec { ... }" fragment
-    if not isinstance(cert, list): cert=[]
-    cert_vec="vec { " + "; ".join(str(int(x)) for x in cert) + " }"
-    print(rid, cert_vec)
-    sys.exit(0)
-print("", "")
-PY "$CERT_JSON")"
+if [[ -z "$RECEIPT_ID" || -z "$CERT_LEN" || -z "$CERT_ARG" ]]; then
+  echo "ERROR: failed to extract receipt_id/certificate from mktd_get_certificate output" >&2
+  exit 5
+fi
 
-[[ -n "$RECEIPT_ID" ]] || die "mktd_get_certificate returned None/empty; receipt may not be ready yet."
+if [[ "$CERT_LEN" -le 0 ]]; then
+  echo "ERROR: certificate blob is empty" >&2
+  exit 6
+fi
 
-echo "[*] Got receipt_id: $RECEIPT_ID"
-echo "[*] Phase C: finalizing..."
+echo "[*] Receipt id: $RECEIPT_ID"
+echo "[*] Certificate length: $CERT_LEN bytes"
 
 if [[ "$MODE" == "factory" ]]; then
-  "${DFX[@]}" canister call "$FACTORY" finalize_profile_receipt \
-    "(principal \"$PROFILE\", \"$RECEIPT_ID\", $CERT_VEC)" >/dev/null
+  echo "[*] Finalizing via factory proxy..."
+"${DFX[@]}" canister call "$FACTORY" finalize_profile_receipt \
+  "(principal \"$PROFILE\", \"$RECEIPT_ID\", $CERT_ARG)" \
+  --network "$NETWORK"
+
 else
-  "${DFX[@]}" canister call "$PROFILE" mktd_finalize_receipt \
-    "(\"$RECEIPT_ID\", $CERT_VEC)" >/dev/null
+  echo "[*] Finalizing directly on profile canister..."
+"${DFX[@]}" canister call "$PROFILE" mktd_finalize_receipt \
+  "(\"$RECEIPT_ID\", $CERT_ARG)" \
+  --network "$NETWORK"
 fi
 
-echo "[*] Confirming pending is now false..."
-PENDING2=$("${DFX[@]}" canister call "$PROFILE" mktd_is_pending --output json \
-  | python3 - <<'PY'
-import json,sys
-d=json.load(sys.stdin)
-if isinstance(d, bool): print("true" if d else "false")
-elif isinstance(d, dict):
-    v=list(d.values())[0] if d else False
-    print("true" if v else "false")
+echo "[*] Re-checking pending state..."
+PENDING2_JSON=$("${DFX[@]}" canister call "$PROFILE" mktd_is_pending --output json --query --network "$NETWORK")
+
+python3 - "$PENDING2_JSON" <<'PY'
+import json, sys
+raw = sys.argv[1]
+try:
+    data = json.loads(raw)
+except Exception as e:
+    print(f"ERROR: could not parse final mktd_is_pending JSON: {e}", file=sys.stderr)
+    print(raw, file=sys.stderr)
+    sys.exit(2)
+
+def extract_bool(x):
+    if isinstance(x, bool):
+        return x
+    if isinstance(x, list) and len(x) == 1:
+        return extract_bool(x[0])
+    if isinstance(x, dict):
+        if "Ok" in x:
+            return extract_bool(x["Ok"])
+        if "ok" in x:
+            return extract_bool(x["ok"])
+    raise ValueError(f"unexpected shape: {x!r}")
+
+pending = extract_bool(data)
+if pending:
+    print("[!] Receipt still pending.")
+    sys.exit(11)
 else:
-    print("false")
+    print("[✓] Receipt no longer pending. Finalization appears complete.")
 PY
-)
-
-if [[ "$PENDING2" == "true" ]]; then
-  die "Still pending after finalization attempt. Check logs; you may need retries."
-fi
-
-echo "[✓] Finalized. receipt_id=$RECEIPT_ID"

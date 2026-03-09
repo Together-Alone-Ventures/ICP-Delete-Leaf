@@ -1,19 +1,24 @@
-//! # MKTd02 -- Leaf-Mode CVDR Engine
+//! # MKTd02 -- Leaf-Mode CVDR Engine (ICP)
 //!
-//! A composable Rust library that any ICP canister can import to produce
-//! CVDRs (Cryptographically Verifiable Deletion Receipts) for GDPR
-//! right-to-erasure compliance.
+//! MKTd02 provides Leaf-mode deletion receipts for single-subject canisters.
 //!
-//! ## Quick Start
+//! ## Canonical flow
 //!
-//! 1. Implement `MKTdDataSource` for your canister's data layer
-//! 2. Call `mktd02::init()` in `#[init]` or first `post_upgrade`
-//! 3. Call `mktd02::on_post_upgrade()` in every `#[post_upgrade]`
-//! 4. Guard PII-mutating functions with `#[mktd_guard]` or `assert_can_write()`
-//! 5. Call `mktd02::refresh_state_hash()` after each PII mutation
-//! 6. Call `mktd02::execute_deletion()` to tombstone and generate a CVDR
-//! 7. Call `mktd02::get_pending_certificate()` in a query to capture the BLS cert
-//! 8. Call `mktd02::finalize_receipt()` to embed the certificate in the receipt
+//! 1. `init()` / `on_post_upgrade()`
+//! 2. Guard PII mutations
+//! 3. `refresh_state_hash()` after successful PII writes
+//! 4. `execute_deletion()` (Phase A, pending receipt)
+//! 5. `get_pending_certificate()` in query context (Phase B)
+//! 6. `finalize_receipt()` (Phase C)
+//!
+//! ## Platform constraint
+//!
+//! Phase B exists because `ic0.data_certificate()` is query-only on ICP.
+//!
+//! ## Clarification
+//!
+//! Deterministic CBOR statements in this project are based on project encoder
+//! constraints and integration rules, not a blanket RFC canonical-CBOR claim.
 
 pub mod certified;
 pub mod engine;
@@ -148,24 +153,24 @@ pub fn get_pending_certificate() -> Option<PendingCertificate> {
 // Public API — Finalization (Phase C)
 // ---------------------------------------------------------------------------
 
-/// Embed BLS certificate and NNS root key in the pending receipt (Phase C).
+/// Finalize a pending receipt by embedding certificate material (Phase C).
 ///
-/// ## Parameters
+/// Parameters:
+/// - `receipt_id`: receipt ID expected for the current pending flow
+/// - `certificate`: certificate blob captured in Phase B
 ///
-/// - `receipt_id`: The 32-byte receipt ID (from Phase B)
-/// - `certificate`: The BLS certificate blob (from Phase B)
-/// - `trust_root_key`: The NNS root public key (96 bytes for mainnet).
-///   The orchestrator provides this from its own configuration.
+/// Guard semantics (see `finalization.rs` for exact behavior):
+/// - pending/finalization-lock state must be valid
+/// - provided `receipt_id` must match expected pending receipt ID
+/// - receipt must not already be finalized
+/// - caller authorization checks are enforced by finalization logic
 ///
-/// ## Guards
+/// On success:
+/// - finalization fields are embedded into the receipt
+/// - finalization lock is released
 ///
-/// - Finalization lock must be held
-/// - Receipt ID must match the pending receipt
-/// - Receipt must not already be finalized
-/// - Caller must be a controller
-///
-/// On success, the receipt is fully self-contained for offline V2
-/// verification and the finalization lock is released.
+/// Note:
+/// A→B→C orchestration follows ICP query/update semantics.
 pub fn finalize_receipt(
     receipt_id: &[u8; 32],
     certificate: Vec<u8>,

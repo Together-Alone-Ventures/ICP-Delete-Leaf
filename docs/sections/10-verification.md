@@ -1,25 +1,36 @@
 ## Verification
 
-Independent verification tools for CVDRs produced by MKTd02 are maintained in a separate repository: [CVDR-Verify](https://github.com/Together-Alone-Ventures/CVDR-Verify).
+Independent verifier tooling is maintained in `CVDR-Verify`.
+This separation is intentional: verifier code is independent from deletion/integration engine code.
 
-This separation is deliberate — the verification repo contains zero deletion engine code, zero adapter code, and zero business logic. It verifies; it does not delete.
+### V1–V4 at a glance
 
-### Available tools
-
-| Tool | Location | Scope |
-|---|---|---|
-| Shell script (`verify-quick.sh`) | `mktd02/verify-quick.sh` | V1 (partial), V3, V4 — quick smoke test via dfx |
-| Rust CLI (`mktd02-verify`) | `mktd02/mktd02-verify/` | V1–V4 full verification including BLS certificate checking |
-
-### Verification procedures
-
-| Check | What it verifies |
+| Check | Scope |
 |---|---|
-| **V1** | Recomputes all cryptographic hashes from raw receipt fields. Confirms receipt integrity — no fields have been tampered with. |
-| **V2** | Verifies the ICP subnet's BLS certificate and confirms the certified data matches the receipt's commitment. This is the trust anchor — it proves the subnet attested to the deletion. |
-| **V3** | Compares the module hash in the receipt against the canister's current code on-chain. Three-way classification: Match, Mismatch-Expected (known upgrade), Mismatch-Suspicious. |
-| **V4** | Confirms the tombstone is still active and the current state hash matches the receipt's post-deletion state hash. Proves the deletion is persistent. |
+| V1 | Receipt hash-consistency checks (protocol formulas) |
+| V2 | ICP certificate/BLS-path checks and certified-data match checks |
+| V3 | Module-hash provenance checks |
+| V4 | Tombstone/state-consistency checks |
 
-### What verification cannot check
+### V2/BLS status (precise wording)
 
-No tool can verify that an enterprise's adapter correctly maps all PII fields to the manifest (Residual Trust assumption RT3). That requires source code audit of the adapter implementation. See the [Disclaimer](https://github.com/Together-Alone-Ventures/CVDR-Verify#disclaimer) in the CVDR-Verify repository.
+The reference verifier provides V2 verification paths for MKTd02 receipts.
+Current behavior is intentionally strict:
+
+- Finalized receipts are expected to carry `bls_certificate` and `trust_root_key_id`.
+- `trust_root_key_id` is validated against known key metadata.
+- Operational/key-rotation behavior is bounded by current verifier and agent capabilities; documented limitations should be treated as active constraints.
+
+### Pending vs finalized context
+
+- Pending receipts may require live-query certificate path.
+- Finalized receipts may use embedded-certificate path.
+
+### Deterministic CBOR note
+
+Deterministic encoding statements are project-rule-specific and should not be interpreted as universal RFC canonical-CBOR equivalence claims.
+
+### Scope boundary
+
+Verifier outputs validate cryptographic/consistency properties of receipts and related on-chain evidence.
+They do not by themselves prove completeness of product-specific PII field mapping without adapter/source review.

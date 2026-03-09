@@ -1,11 +1,15 @@
-//! # MKTdDataSource Trait & GuardError Trait
+//! # `MKTdDataSource` Integration Boundary
 //!
-//! The adapter trait that host canisters implement to integrate with MKTd02.
+//! This module defines the host-canister adapter contract for MKTd02.
 //!
-//! ## v0.2.0 Changes
+//! ## Leaf-mode boundary
 //!
-//! - Removed `manifest_hash()` — PII boundary is now anchored by
-//!   module_hash → archived source code, not a dedicated manifest hash.
+//! MKTd02 integrations are Leaf mode (single subject per canister).
+//! Multi-subject-per-canister architecture is out of scope for MKTd02.
+//!
+//! ## v0.2.x note
+//!
+//! `manifest_hash()` is not part of the `MKTdDataSource` trait contract.
 
 use zombie_core::FieldDescriptor;
 
@@ -27,18 +31,18 @@ impl CommitMode {
     }
 }
 
-/// The adapter trait that host canisters implement to integrate with MKTd02.
+/// Adapter trait for mapping host-canister state to MKTd02.
 ///
-/// Each method maps to a specific aspect of the PII lifecycle:
-/// - `mode()`: Declares Leaf or Tree commit mode
-/// - `pii_field_manifest()`: Defines the PII boundary (documentation obligation)
-/// - `get_state_bytes()`: Current PII state as deterministic CBOR bytes
-/// - `tombstone_state()`: Overwrites all PII fields with TOMBSTONE_CONSTANT
-/// - `is_tombstoned()`: Checks whether all PII fields are tombstoned
+/// Integration intent:
+/// - `mode()` declares integration mode (`CommitMode::Leaf` for MKTd02 usage)
+/// - `pii_field_manifest()` describes boundary metadata
+/// - `get_state_bytes()` returns deterministic bytes for hashing
+/// - `tombstone_state()` applies tombstone writes to declared fields
+/// - `is_tombstoned()` reports the expected post-condition
 ///
-/// **v0.2.0 note:** `manifest_hash()` has been removed. The PII boundary
-/// is anchored by `module_hash` → archived source code → adapter implementation.
-/// Enterprises must publish a State Encoding Spec as a documentation obligation.
+/// Clarification:
+/// Deterministic encoding requirements are project-rule-specific and should
+/// not be interpreted as a blanket RFC canonical-CBOR equivalence claim.
 pub trait MKTdDataSource {
     fn mode(&self) -> CommitMode;
     fn pii_field_manifest(&self) -> Vec<FieldDescriptor>;

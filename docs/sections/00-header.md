@@ -6,4 +6,4 @@
 
 This guide covers the complete integration of MKTd02 into an ICP canister. It combines MKTd02-specific instructions with platform-level documentation shared across all Zombie Delete ICP products.
 
-For the complete deletion process flow, verification procedures, and residual trust analysis, see the MKTd02 tab in the Zombie Delete Configurations spreadsheet. For independent receipt verification tooling, see the MKTd02 README.
+For implementation flow and verification guidance, use this guide and the linked MKTd02 section sources. The Zombie Delete Configurations spreadsheet remains supporting context only. For independent receipt verification tooling, see the MKTd02 README.

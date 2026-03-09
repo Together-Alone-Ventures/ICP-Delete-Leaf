@@ -38,9 +38,9 @@ sections:
     local: 02-add-crate.md
 
   - local: 03-adapter.md
-  - shared: icp/deterministic-encoding.md
+  - local: 11-deterministic-encoding.md
   - local: 04-lifecycle-hooks.md
-  - shared: icp/module-hash-pipeline.md
+  - local: module-hash-pipeline.md
   - local: 05-api-endpoints.md
   - shared: icp/tombstone-patterns.md
   - local: 06-stable-memory.md
@@ -61,4 +61,8 @@ sections:
     merge:
       base: 09-assumptions-product.md
       append: shared/icp/assumptions-platform.md
+    strip_heading: true
+
+  - heading: "# 7. Verification"
+    local: 10-verification.md
     strip_heading: true

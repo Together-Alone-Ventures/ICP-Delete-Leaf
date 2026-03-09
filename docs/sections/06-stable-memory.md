@@ -25,4 +25,4 @@ When finalization lock is held (pending receipt), operations that would drift ce
 
 ### Clarification
 
-`manifest_hash` is not a v0.2.x stable-memory slot in MKTd02.
+Legacy `manifest_hash` terminology is not a v0.2.x stable-memory slot in MKTd02.

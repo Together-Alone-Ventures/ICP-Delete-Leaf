@@ -17,7 +17,7 @@ Multi-subject-per-canister architecture is out of scope for MKTd02 and belongs t
 | `tombstone_state()` | — | Applies tombstone writes to PII fields. |
 | `is_tombstoned()` | `bool` | Post-condition check for tombstone state. |
 
-`manifest_hash()` is not part of the v0.2.x `MKTdDataSource` trait.
+Legacy `manifest_hash()` terminology is not part of the v0.2.x `MKTdDataSource` trait.
 
 ### State Encoding Specification Requirement
 

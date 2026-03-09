@@ -26,7 +26,7 @@ Current behavior is intentionally strict:
 
 ### V3 model (archival-first)
 
-- Primary path: archival provenance (`module_hash` in receipt -> published build/release record such as `RELEASES.md` -> reproducible build -> inspectable source).
+- Primary path: archival provenance (`module_hash` in receipt -> published build/release record such as `RELEASES` -> reproducible build -> inspectable source).
 - Secondary path: live on-chain module-hash corroboration, where infrastructure still exists.
 - `module_hash` is the SHA-256 of the exact deployed WASM bytes. It is not a special ICP object with extra canister metadata.
 

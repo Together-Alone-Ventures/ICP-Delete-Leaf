@@ -31,10 +31,16 @@ This is a platform constraint, not product-specific behavior.
 
 The reference verifier in `CVDR-Verify` provides V1–V4 verification paths.
 
-V2 wording should be read carefully:
-- V2 paths are supported (pending/live-query and finalized/embedded-certificate contexts).
-- Behavior is intentionally strict around known trust-root-key identifiers.
-- Some operational/key-rotation handling depends on current verifier/agent capabilities and should not be overinterpreted as “all edge cases solved.”
+V2 and V3 should be read as dual-path models:
+- V2 primary (finalized receipts): embedded-certificate receipt-contained verification.
+- V2 secondary (pending or still-live contexts): live certified-query corroboration path.
+- V3 primary: archival module-hash provenance (`module_hash` -> published build/release record -> reproducible build -> inspectable source).
+- V3 secondary: live on-chain module-hash corroboration where infrastructure still exists.
+
+Finalized receipt export is evidentiary preservation:
+- V1 and V2 can be verified from exported finalized receipt artifacts.
+- V3 additionally requires published build/release provenance.
+- V4 remains a live canister/state check.
 
 See `docs/sections/10-verification.md` for precise wording.
 

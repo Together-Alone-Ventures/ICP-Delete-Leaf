@@ -237,7 +237,7 @@ pub fn is_pending_finalization() -> bool {
 #[cfg(test)]
 mod tests {
     use super::read_pending_receipt_id;
-    use crate::nonce::increment_nonce;
+    use crate::nonce::increment_deletion_seq;
     use crate::storage::{
         acquire_finalization_lock, pending_receipt_id, release_finalization_lock,
         set_pending_receipt_id, setup_storage,
@@ -251,15 +251,15 @@ mod tests {
     }
 
     #[test]
-    fn pending_identity_helper_uses_persisted_value_not_nonce() {
+    fn pending_identity_helper_uses_persisted_value_not_deletion_seq() {
         setup_test_storage(100);
         acquire_finalization_lock();
 
         let pending_id = [0xAB; 32];
         set_pending_receipt_id(pending_id);
-        let before_nonce = increment_nonce();
-        let after_nonce = increment_nonce();
-        assert!(after_nonce > before_nonce);
+        let before_seq = increment_deletion_seq();
+        let after_seq = increment_deletion_seq();
+        assert!(after_seq > before_seq);
 
         let helper_id = read_pending_receipt_id();
         assert_eq!(helper_id, Some(pending_id));

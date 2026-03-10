@@ -6,7 +6,7 @@
 //! |---------|----------------------|-----------------------------------------------|
 //! | base+0  | Meta cell            | schema_version, memory_base, init_at, mod_hash, pending_receipt_id |
 //! | base+1  | state_hash           | [u8; 32]                                      |
-//! | base+2  | nonce                | u64                                           |
+//! | base+2  | deletion_seq         | u64                                           |
 //! | base+3  | certified_commitment | [u8; 32]                                      |
 //! | base+4  | deletion_event_hash  | [u8; 32]                                      |
 //! | base+5  | finalization_lock    | bool (prevents certified_data drift)          |
@@ -147,7 +147,7 @@ impl Storable for MetaCell {
     };
 }
 
-/// u64 wrapper for nonce storage. Little-endian encoding.
+/// u64 wrapper for deletion sequence storage. Little-endian encoding.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct StorableU64(pub u64);
 
@@ -240,7 +240,7 @@ impl Storable for ReceiptBytes {
 pub(crate) struct MktdStorage {
     pub meta: StableCell<MetaCell, Memory>,
     pub state_hash: StableCell<Hash32, Memory>,
-    pub nonce: StableCell<StorableU64, Memory>,
+    pub deletion_seq: StableCell<StorableU64, Memory>,
     pub certified_commitment: StableCell<Hash32, Memory>,
     pub deletion_event_hash: StableCell<Hash32, Memory>,
     pub finalization_lock: StableCell<StorableBool, Memory>,
@@ -272,8 +272,8 @@ pub(crate) fn setup_storage(mm: &MemoryManager<DefaultMemoryImpl>, base: u8) {
             .expect("MKTd02: failed to init meta cell"),
         state_hash: StableCell::init(mm.get(MemoryId::new(base + 1)), Hash32::default())
             .expect("MKTd02: failed to init state_hash cell"),
-        nonce: StableCell::init(mm.get(MemoryId::new(base + 2)), StorableU64::default())
-            .expect("MKTd02: failed to init nonce cell"),
+        deletion_seq: StableCell::init(mm.get(MemoryId::new(base + 2)), StorableU64::default())
+            .expect("MKTd02: failed to init deletion_seq cell"),
         certified_commitment: StableCell::init(
             mm.get(MemoryId::new(base + 3)),
             Hash32::default(),

@@ -14,7 +14,7 @@
 //!   `mktd_finalize_receipt()`.
 
 use crate::certified::publish_certified_commitment;
-use crate::nonce::increment_nonce;
+use crate::nonce::increment_deletion_seq;
 use crate::state::compute_state_hash;
 use crate::storage::{
     with_storage, with_storage_mut, Hash32, MetaCell, OptionalTimestamp, ReceiptBytes,
@@ -51,7 +51,7 @@ impl core::fmt::Display for DeletionError {
 /// called. This is a hard invariant enforced in `publish_certified_commitment`.
 pub fn execute_deletion<A: MKTdDataSource>(
     adapter: &mut A,
-    config: &MktdConfig,
+    _config: &MktdConfig,
 ) -> Result<[u8; 32], DeletionError> {
     // (a) Validate not tombstoned
     if crate::guard::is_tombstoned() {
@@ -78,15 +78,16 @@ pub fn execute_deletion<A: MKTdDataSource>(
     // (d) Capture post_state_hash
     let post_state_hash = compute_state_hash(&adapter.get_state_bytes());
 
-    // (e) Increment nonce
-    let nonce = increment_nonce();
+    // (e) Increment deletion sequence
+    let deletion_seq = increment_deletion_seq();
+    let record_id = ic_cdk::caller().as_slice().to_vec();
 
     // (f) Compute tombstone_hash
     let tombstone_hash = hash_with_tag(TAG_TOMBSTONE_HASH, &[
         canister_id.as_slice(),
         tombstone_constant(),
         &timestamp.to_be_bytes(),
-        &nonce.to_be_bytes(),
+        &deletion_seq.to_be_bytes(),
     ]);
 
     // (g) Read module_hash from storage
@@ -99,7 +100,7 @@ pub fn execute_deletion<A: MKTdDataSource>(
         &post_state_hash,
         &timestamp.to_be_bytes(),
         &module_hash,
-        &nonce.to_be_bytes(),
+        &deletion_seq.to_be_bytes(),
     ]);
 
     // (i) Store tombstoned_at (engine-owned; see storage.rs docs)
@@ -125,15 +126,15 @@ pub fn execute_deletion<A: MKTdDataSource>(
     crate::storage::acquire_finalization_lock();
 
     // (k) Compute and persist pending receipt_id while lock is held
-    let receipt_id = compute_receipt_id(&canister_id, nonce);
+    let receipt_id = compute_receipt_id(&canister_id, &record_id, deletion_seq);
     crate::storage::set_pending_receipt_id(receipt_id);
 
     // (l) Construct receipt
     let receipt = DeletionReceipt {
-        protocol_version: ProtocolVersion::V2.into(),
+        protocol_version: ProtocolVersion::V3.into(),
         receipt_id,
         canister_id,
-        subnet_id: config.subnet_id,
+        record_id,
         pre_state_hash,
         post_state_hash,
         tombstone_hash,
@@ -141,7 +142,7 @@ pub fn execute_deletion<A: MKTdDataSource>(
         certified_commitment,
         module_hash,
         timestamp,
-        nonce,
+        deletion_seq,
         bls_certificate: None,      // Populated during finalization (Phase C)
         trust_root_key_id: String::new(),      // Populated during finalization (Phase C)
     };

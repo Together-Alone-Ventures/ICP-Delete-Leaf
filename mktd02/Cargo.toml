@@ -11,7 +11,7 @@ repository.workspace = true
 # Switch to tag = "zombie-core-vX.Y.Z" for releases.
 # NAMING CONVENTION: always write "zombie-core vX.Y.Z" (repo-prefixed)
 # when referencing this dependency alongside MKTd02 version strings.
-zombie-core = { git = "https://github.com/Together-Alone-Ventures/zombie-core", rev = "11dcd420196e58be6238e5693505e9560062a3b6" }
+zombie-core = { git = "https://github.com/Together-Alone-Ventures/zombie-core", rev = "a79ef846fb07177b31c86940431bdc0e2e1f8f96" }
 ic-cdk = "0.17"
 ic-stable-structures = "0.6"
 candid = "0.10"

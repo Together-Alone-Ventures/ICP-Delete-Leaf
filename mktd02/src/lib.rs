@@ -36,7 +36,6 @@ pub use finalization::{FinalizationError, PendingCertificate};
 pub use trait_def::{CommitMode, GuardError, MKTdDataSource};
 pub use zombie_core::{DeletionReceipt, FieldDescriptor, ProtocolVersion, ReceiptSummary};
 
-use candid::Principal;
 use ic_stable_structures::memory_manager::MemoryManager;
 use ic_stable_structures::DefaultMemoryImpl;
 use storage::Hash32;
@@ -50,15 +49,12 @@ pub struct MktdConfig {
     /// Base MemoryId for MKTd02's 8 stable memory slots (default: 100).
     /// Range: base + 7 must be <= 255.
     pub base_memory_id: u8,
-    /// Subnet ID for receipt construction.
-    pub subnet_id: Principal,
 }
 
 impl Default for MktdConfig {
     fn default() -> Self {
         Self {
             base_memory_id: 100,
-            subnet_id: Principal::anonymous(),
         }
     }
 }

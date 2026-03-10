@@ -22,24 +22,16 @@
 //! it is determined by the build configuration (mainnet vs local-dev).
 //! This eliminates the risk of an integrator supplying a wrong or fabricated key.
 //!
-//! ## Nonce Invariant
+//! ## Pending Identity Invariant
 //!
-//! Phase B and Phase C both derive the pending receipt_id from
-//! (canister_id, current_nonce()). This is correct only while the
-//! finalization lock is held — the lock is acquired in Phase A and
-//! released at the end of Phase C. No code path must advance the nonce
-//! while the lock is held.
-//!
-//! HARDENING TODO: store the pending receipt_id in a dedicated stable-memory
-//! cell during Phase A, and read it here rather than recomputing. This removes
-//! any risk if an integrator accidentally increments the nonce between phases.
-//! Tracked as a follow-up to Change A.
+//! Phase A stores the pending receipt_id in stable memory while the
+//! finalization lock is held. Phase B and Phase C read this persisted value
+//! directly. This avoids any recomputation coupling to mutable runtime values.
 
 use crate::certified::read_certified_commitment;
-use crate::nonce::current_nonce;
 use crate::storage::{with_storage, with_storage_mut, Hash32, ReceiptBytes};
 use zombie_core::nns_keys;
-use zombie_core::receipt::{compute_receipt_id, DeletionReceipt};
+use zombie_core::receipt::DeletionReceipt;
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -110,6 +102,13 @@ pub struct PendingCertificate {
     pub certificate: Vec<u8>,
 }
 
+fn read_pending_receipt_id() -> Option<[u8; 32]> {
+    if !crate::storage::is_finalization_locked() {
+        return None;
+    }
+    crate::storage::pending_receipt_id()
+}
+
 /// Phase B: Retrieve the BLS certificate for the pending receipt.
 ///
 /// **Must be called in query context** — `ic0.data_certificate()` is
@@ -119,22 +118,11 @@ pub struct PendingCertificate {
 /// The orchestrator passes `certificate` to `finalize_receipt()` in Phase C.
 /// The NNS root key ID is determined automatically by the library.
 ///
-/// ## Nonce safety
-///
-/// receipt_id is derived from (canister_id, current_nonce()). This is safe
-/// because the finalization lock — checked first — guarantees no other
-/// deletion (which would advance the nonce) can run concurrently.
+/// The returned `receipt_id` is loaded from persisted pending-finalization
+/// state set by Phase A.
 pub fn get_pending_certificate() -> Option<PendingCertificate> {
-    // Check finalization lock — SAFETY: nonce must not change while lock is held
-    if !crate::storage::is_finalization_locked() {
-        return None;
-    }
-
-    // Derive pending receipt_id from canister_id + current nonce.
-    // Correct only while finalization lock is held (see module-level note).
-    let canister_id = ic_cdk::id();
-    let nonce = current_nonce();
-    let receipt_id = compute_receipt_id(&canister_id, nonce);
+    // Source of truth: pending receipt_id persisted in Phase A.
+    let receipt_id = read_pending_receipt_id()?;
 
     // Read certified commitment
     let certified_commitment = read_certified_commitment();
@@ -175,31 +163,21 @@ pub fn get_pending_certificate() -> Option<PendingCertificate> {
 /// On success, the receipt's `bls_certificate` and `trust_root_key_id`
 /// fields are populated and the finalization lock is released.
 ///
-/// ## Nonce safety
-///
-/// expected_id is derived from (canister_id, current_nonce()). Correct only
-/// while finalization lock is held — no path must advance the nonce between
-/// Phase A and Phase C. See module-level HARDENING TODO.
 pub fn finalize_receipt(
     receipt_id: &[u8; 32],
     certificate: Vec<u8>,
 ) -> Result<(), FinalizationError> {
-    // Guard 1: finalization lock must be held — SAFETY: nonce stable while locked
-    if !crate::storage::is_finalization_locked() {
-        return Err(FinalizationError::NoPendingReceipt);
-    }
+    // Guard 1: finalization lock must be held
+    let expected_id = match read_pending_receipt_id() {
+        Some(id) => id,
+        None => return Err(FinalizationError::NoPendingReceipt),
+    };
 
     // Guard 2: caller must be a controller
     let caller = ic_cdk::caller();
     if !ic_cdk::api::is_controller(&caller) {
         return Err(FinalizationError::NotController);
     }
-
-    // Derive expected receipt_id from canister_id + current nonce.
-    // Safe: finalization lock ensures nonce has not advanced since Phase A.
-    let canister_id = ic_cdk::id();
-    let nonce = current_nonce();
-    let expected_id = compute_receipt_id(&canister_id, nonce);
 
     // Guard 3: receipt_id must match
     if receipt_id != &expected_id {
@@ -254,4 +232,39 @@ pub fn finalize_receipt(
 /// Convenience wrapper for the finalization lock check.
 pub fn is_pending_finalization() -> bool {
     crate::storage::is_finalization_locked()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_pending_receipt_id;
+    use crate::nonce::increment_nonce;
+    use crate::storage::{
+        acquire_finalization_lock, pending_receipt_id, release_finalization_lock,
+        set_pending_receipt_id, setup_storage,
+    };
+    use ic_stable_structures::memory_manager::MemoryManager;
+    use ic_stable_structures::DefaultMemoryImpl;
+
+    fn setup_test_storage(base: u8) {
+        let mm = MemoryManager::init(DefaultMemoryImpl::default());
+        setup_storage(&mm, base);
+    }
+
+    #[test]
+    fn pending_identity_helper_uses_persisted_value_not_nonce() {
+        setup_test_storage(100);
+        acquire_finalization_lock();
+
+        let pending_id = [0xAB; 32];
+        set_pending_receipt_id(pending_id);
+        let before_nonce = increment_nonce();
+        let after_nonce = increment_nonce();
+        assert!(after_nonce > before_nonce);
+
+        let helper_id = read_pending_receipt_id();
+        assert_eq!(helper_id, Some(pending_id));
+        assert_eq!(pending_receipt_id(), Some(pending_id));
+
+        release_finalization_lock();
+    }
 }

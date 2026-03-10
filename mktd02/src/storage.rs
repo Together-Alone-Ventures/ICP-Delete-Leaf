@@ -4,7 +4,7 @@
 //!
 //! | Offset  | Content              | Type                                          |
 //! |---------|----------------------|-----------------------------------------------|
-//! | base+0  | Meta cell            | schema_version, memory_base, init_at, mod_hash|
+//! | base+0  | Meta cell            | schema_version, memory_base, init_at, mod_hash, pending_receipt_id |
 //! | base+1  | state_hash           | [u8; 32]                                      |
 //! | base+2  | nonce                | u64                                           |
 //! | base+3  | certified_commitment | [u8; 32]                                      |
@@ -63,7 +63,12 @@ impl Storable for Hash32 {
     };
 }
 
-/// Meta cell: schema_version(4) + memory_base(4) + has_init(1) + init_at(8) + module_hash(32) = 49 bytes
+/// Meta cell (legacy + current decoding):
+///
+/// - Legacy layout (49 bytes):
+///   schema_version(4) + memory_base(4) + has_init(1) + init_at(8) + module_hash(32)
+/// - Current layout (82 bytes):
+///   legacy(49) + has_pending_receipt_id(1) + pending_receipt_id(32)
 ///
 /// All integer fields use little-endian encoding (stable memory convention).
 #[derive(Clone, Debug)]
@@ -72,6 +77,7 @@ pub(crate) struct MetaCell {
     pub memory_base: u32,
     pub initialised_at: Option<u64>,
     pub module_hash: [u8; 32],
+    pub pending_receipt_id: Option<[u8; 32]>,
 }
 
 impl Default for MetaCell {
@@ -81,13 +87,14 @@ impl Default for MetaCell {
             memory_base: 0,
             initialised_at: None,
             module_hash: [0u8; 32],
+            pending_receipt_id: None,
         }
     }
 }
 
 impl Storable for MetaCell {
     fn to_bytes(&self) -> Cow<'_, [u8]> {
-        let mut buf = vec![0u8; 49];
+        let mut buf = vec![0u8; 82];
         buf[0..4].copy_from_slice(&self.schema_version.to_le_bytes());
         buf[4..8].copy_from_slice(&self.memory_base.to_le_bytes());
         match self.initialised_at {
@@ -98,9 +105,20 @@ impl Storable for MetaCell {
             None => {} // already zeroed
         }
         buf[17..49].copy_from_slice(&self.module_hash);
+        if let Some(pending_id) = self.pending_receipt_id {
+            buf[49] = 1;
+            buf[50..82].copy_from_slice(&pending_id);
+        }
         Cow::Owned(buf)
     }
     fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
+        let raw = bytes.as_ref();
+        if raw.len() != 49 && raw.len() != 82 {
+            ic_cdk::trap(&format!(
+                "MKTd02: invalid MetaCell byte length {} (expected 49 or 82)",
+                raw.len()
+            ));
+        }
         let schema_version = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
         let memory_base = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
         let has_init = bytes[8];
@@ -108,16 +126,24 @@ impl Storable for MetaCell {
         let initialised_at = if has_init == 1 { Some(init_val) } else { None };
         let mut module_hash = [0u8; 32];
         module_hash.copy_from_slice(&bytes[17..49]);
+        let pending_receipt_id = if raw.len() == 82 && bytes[49] == 1 {
+            let mut pending_id = [0u8; 32];
+            pending_id.copy_from_slice(&bytes[50..82]);
+            Some(pending_id)
+        } else {
+            None
+        };
         Self {
             schema_version,
             memory_base,
             initialised_at,
             module_hash,
+            pending_receipt_id,
         }
     }
     const BOUND: Bound = Bound::Bounded {
-        max_size: 49,
-        is_fixed_size: true,
+        max_size: 82,
+        is_fixed_size: false,
     };
 }
 
@@ -363,5 +389,88 @@ pub(crate) fn release_finalization_lock() {
         s.finalization_lock
             .set(StorableBool(false))
             .expect("MKTd02: failed to release finalization_lock");
+        let mut meta = s.meta.get().clone();
+        meta.pending_receipt_id = None;
+        s.meta
+            .set(meta)
+            .expect("MKTd02: failed to clear pending_receipt_id");
     });
+}
+
+/// Persist the pending receipt ID while finalization lock is held.
+pub(crate) fn set_pending_receipt_id(receipt_id: [u8; 32]) {
+    with_storage_mut(|s| {
+        let mut meta = s.meta.get().clone();
+        meta.pending_receipt_id = Some(receipt_id);
+        s.meta
+            .set(meta)
+            .expect("MKTd02: failed to set pending_receipt_id");
+    });
+}
+
+/// Read the persisted pending receipt ID (if any).
+pub(crate) fn pending_receipt_id() -> Option<[u8; 32]> {
+    with_storage(|s| s.meta.get().pending_receipt_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        acquire_finalization_lock, pending_receipt_id, release_finalization_lock,
+        set_pending_receipt_id, setup_storage, MetaCell,
+    };
+    use ic_stable_structures::memory_manager::MemoryManager;
+    use ic_stable_structures::{DefaultMemoryImpl, Storable};
+    use std::borrow::Cow;
+
+    fn setup_test_storage(base: u8) {
+        let mm = MemoryManager::init(DefaultMemoryImpl::default());
+        setup_storage(&mm, base);
+    }
+
+    #[test]
+    fn meta_cell_decodes_legacy_49_byte_layout() {
+        let mut legacy = vec![0u8; 49];
+        legacy[0..4].copy_from_slice(&7u32.to_le_bytes());
+        legacy[4..8].copy_from_slice(&123u32.to_le_bytes());
+        legacy[8] = 1;
+        legacy[9..17].copy_from_slice(&42u64.to_le_bytes());
+        legacy[17..49].copy_from_slice(&[0x11; 32]);
+
+        let decoded = MetaCell::from_bytes(Cow::Owned(legacy));
+        assert_eq!(decoded.schema_version, 7);
+        assert_eq!(decoded.memory_base, 123);
+        assert_eq!(decoded.initialised_at, Some(42));
+        assert_eq!(decoded.module_hash, [0x11; 32]);
+        assert_eq!(decoded.pending_receipt_id, None);
+    }
+
+    #[test]
+    fn meta_cell_roundtrip_preserves_pending_receipt_id() {
+        let meta = MetaCell {
+            schema_version: 1,
+            memory_base: 100,
+            initialised_at: Some(99),
+            module_hash: [0x22; 32],
+            pending_receipt_id: Some([0x33; 32]),
+        };
+        let encoded = meta.to_bytes();
+        assert_eq!(encoded.len(), 82);
+        let decoded = MetaCell::from_bytes(encoded);
+        assert_eq!(decoded.schema_version, meta.schema_version);
+        assert_eq!(decoded.memory_base, meta.memory_base);
+        assert_eq!(decoded.initialised_at, meta.initialised_at);
+        assert_eq!(decoded.module_hash, meta.module_hash);
+        assert_eq!(decoded.pending_receipt_id, meta.pending_receipt_id);
+    }
+
+    #[test]
+    fn release_lock_clears_pending_receipt_id() {
+        setup_test_storage(101);
+        acquire_finalization_lock();
+        set_pending_receipt_id([0x55; 32]);
+        assert_eq!(pending_receipt_id(), Some([0x55; 32]));
+        release_finalization_lock();
+        assert_eq!(pending_receipt_id(), None);
+    }
 }

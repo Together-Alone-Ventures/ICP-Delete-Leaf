@@ -124,9 +124,11 @@ pub fn execute_deletion<A: MKTdDataSource>(
     //      may call certified_data_set() until finalize_receipt() releases it.
     crate::storage::acquire_finalization_lock();
 
-    // (k) Compute receipt_id and construct receipt
+    // (k) Compute and persist pending receipt_id while lock is held
     let receipt_id = compute_receipt_id(&canister_id, nonce);
+    crate::storage::set_pending_receipt_id(receipt_id);
 
+    // (l) Construct receipt
     let receipt = DeletionReceipt {
         protocol_version: ProtocolVersion::V2.into(),
         receipt_id,
@@ -144,7 +146,7 @@ pub fn execute_deletion<A: MKTdDataSource>(
         trust_root_key_id: String::new(),      // Populated during finalization (Phase C)
     };
 
-    // (l) Store receipt as CBOR in StableBTreeMap
+    // (m) Store receipt as CBOR in StableBTreeMap
     let mut cbor_buf = Vec::new();
     ciborium::into_writer(&receipt, &mut cbor_buf)
         .expect("MKTd02: failed to CBOR-encode receipt");
@@ -153,7 +155,7 @@ pub fn execute_deletion<A: MKTdDataSource>(
             .insert(Hash32(receipt_id), ReceiptBytes(cbor_buf));
     });
 
-    // (m) Return receipt_id
+    // (n) Return receipt_id
     Ok(receipt_id)
 }
 
@@ -210,6 +212,7 @@ pub(crate) fn first_init<A: MKTdDataSource>(
             memory_base: config.base_memory_id as u32,
             initialised_at: Some(timestamp),
             module_hash,
+            pending_receipt_id: None,
         };
         s.meta
             .set(meta)

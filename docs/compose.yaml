@@ -10,7 +10,7 @@ output: "MKTd02_Integration_Guide.md"
 # read these fields. They live here so the manifest is the single source of
 # truth for "which shared docs version does this product release use".
 shared_repo: "Together-Alone-Ventures/zombie-delete-docs"
-shared_ref: "v1.0.0"  # pin to tag for releases; use "main" for dev builds
+shared_ref: "main"  # pin to tag for releases; use "main" for dev builds
 
 # ── Section composition order ─────────────────────────────────────────
 #

@@ -17,12 +17,15 @@ This separation is intentional: verifier code is independent from deletion/integ
 The reference verifier provides V2 verification paths for MKTd02 receipts.
 Current behavior is intentionally strict:
 
+- New MKTd02 receipts are `protocol_version = "mktd02-v3"`.
 - Pending receipts (no embedded certificate yet) use a live certified-query path as secondary corroboration/fallback.
 - Finalized receipts are expected to carry `bls_certificate` and `trust_root_key_id` and use the embedded-certificate path as the primary long-term evidentiary route.
 - In archived receipt-contained verification, only freshness-at-verification-time is intentionally relaxed.
 - Signature authenticity, delegation trust, canister authorization, and certified-data commitment matching are still verified.
 - `trust_root_key_id` is validated against known key metadata.
 - Operational/key-rotation behavior is bounded by current verifier and agent capabilities; documented limitations should be treated as active constraints.
+
+For MKTd02 finalization flow, pending receipt identity is persisted in stable memory during Phase A and reused in Phase B/C, rather than being recomputed from live context.
 
 ### V3 model (archival-first)
 

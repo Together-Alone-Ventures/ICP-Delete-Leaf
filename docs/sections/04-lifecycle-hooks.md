@@ -8,11 +8,9 @@ let module_hash = [0u8; 32]; // ⚠ DEV ONLY — see Module Hash: Deployment Pat
 MEMORY_MANAGER.with(|mm| {
     mktd02::init(&adapter, &mm.borrow(), MktdConfig {
         base_memory_id: 100,
-        subnet_id: Principal::from_text("jtdsg-3h6gi-...").unwrap(),
     }, module_hash);
 });
 ```
-**Subnet ID:** This value cannot be discovered at runtime. Obtain it from the [ICP dashboard](https://dashboard.internetcomputer.org/) (look up your canister, note the subnet it's hosted on) or query the NNS registry. Using `Principal::anonymous()` will produce receipts with an invalid subnet field that cannot be verified.
 This computes the initial state hash and publishes the certified commitment.
 ### post_upgrade()
 Call `mktd02::on_post_upgrade()` after schema migration but before any PII reads:
@@ -21,7 +19,6 @@ let adapter = MyAdapter;
 let module_hash = [0u8; 32]; // ⚠ DEV ONLY — see Module Hash: Deployment Patterns for production
 let config = MktdConfig {
     base_memory_id: 100,
-    subnet_id: Principal::from_text("jtdsg-3h6gi-...").unwrap(),
 };
 MEMORY_MANAGER.with(|mm| {
     mktd02::on_post_upgrade(&adapter, &mm.borrow(), config, module_hash);

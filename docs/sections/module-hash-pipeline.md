@@ -41,4 +41,4 @@ If your deployment path genuinely cannot plumb the module hash into the init or 
 
 ### Warning: `reinstall` mode
 
-> ⚠ **ICP's `reinstall` mode wipes stable memory.** This destroys all Zombie Delete state including stored receipts, tombstone status, and nonce history. Treat `reinstall` as new genesis — prior CVDRs are irrecoverably lost. If your deployment process uses `reinstall` for any reason, be aware that the canister's entire deletion history is erased. Use `upgrade` mode for all routine deployments.
+> ⚠ **ICP's `reinstall` mode wipes stable memory.** This destroys all Zombie Delete state including stored receipts, tombstone status, and deletion-sequence history. Treat `reinstall` as new genesis — prior CVDRs are irrecoverably lost. If your deployment process uses `reinstall` for any reason, be aware that the canister's entire deletion history is erased. Use `upgrade` mode for all routine deployments.

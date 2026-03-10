@@ -6,7 +6,7 @@ MKTd02 reserves 8 contiguous memory slots from a configurable base (`base_memory
 |---|---|---|---|
 | base+0 | meta | metadata cell | schema/base/init/module-hash fields |
 | base+1 | state_hash | `[u8; 32]` | current state hash |
-| base+2 | nonce | `u64` | monotonic counter |
+| base+2 | deletion_seq | `u64` | monotonic counter (same slot formerly labelled `nonce`) |
 | base+3 | certified_commitment | `[u8; 32]` | certified commitment value |
 | base+4 | deletion_event_hash | `[u8; 32]` | deletion-event hash value |
 | base+5 | finalization_lock | `bool` | prevents certified-data drift between Phase A and C |
@@ -25,4 +25,5 @@ When finalization lock is held (pending receipt), operations that would drift ce
 
 ### Clarification
 
-Legacy `manifest_hash` terminology is not a v0.2.x stable-memory slot in MKTd02.
+Legacy `manifest_hash` terminology is not a v0.3 stable-memory slot in MKTd02.
+The `base+2` slot position is unchanged in v0.3; only the semantic label changed from `nonce` to `deletion_seq`.

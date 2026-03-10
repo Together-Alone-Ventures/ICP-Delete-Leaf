@@ -12,20 +12,32 @@ Detailed and normative wording lives in:
 - `docs/sections/10-verification.md`
 - `docs/architecture/finalization-flow.md`
 
-## Key Invariants (v0.2.x)
+## Key Invariants (v0.3.x)
 
 - Receipt ID derivation:
-  - `receipt_id = hash_with_tag(TAG_RECEIPT, canister_id || nonce)`
+  - `receipt_id = hash_with_tag(TAG_RECEIPT_V3, [u32_be(len(canister_id_bytes)), canister_id_bytes, u32_be(len(record_id_bytes)), record_id_bytes, u64_be(deletion_seq)])`
 - Three-phase receipt lifecycle:
   - Phase A (update): tombstone + pending receipt
   - Phase B (ingress query): capture certificate material from query context
   - Phase C (update): finalize pending receipt by embedding certificate fields
-- v0.2.x Leaf-mode receipts do not include `manifest_hash` or `commit_mode`.
+- MKTd02 Leaf-mode receipts are `mktd02-v3` and include `record_id` and `deletion_seq`.
+- `subnet_id` is no longer part of `MktdConfig` or `DeletionReceipt`.
+- `manifest_hash` and `commit_mode` are not part of Leaf-mode receipt fields.
+
+## Leaf-Mode `record_id` rule
+
+`record_id` is an opaque byte vector at schema level.
+In MKTd02 leaf mode specifically, it is derived internally as `ic_cdk::caller().as_slice().to_vec()`.
 
 ## ICP Platform Constraint (A→B→C)
 
 The A→B→C pattern is driven by ICP semantics: `ic0.data_certificate()` is query-only.
 This is a platform constraint, not product-specific behavior.
+
+## Finalization Identity Invariant
+
+Phase A persists the pending `receipt_id` while finalization lock is held.
+Phase B and Phase C read that persisted pending identity directly; they do not recompute from live context.
 
 ## Verification Status (Reference Verifier)
 
@@ -62,5 +74,5 @@ This should not be read as a blanket RFC 8949 canonical-CBOR equivalence claim.
 
 ## Status
 
-Current protocol line in this repository: v0.2.x (Leaf mode).
-Treat v0.1.0-era formulas/field lists as historical unless explicitly marked otherwise.
+Current protocol line in this repository: v0.3.x (Leaf mode).
+Treat v0.2.0-era formulas/field lists as historical unless explicitly marked otherwise.

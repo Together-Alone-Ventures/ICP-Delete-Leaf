@@ -28,6 +28,8 @@ Detailed and normative wording lives in:
 
 `record_id` is an opaque byte vector at schema level.
 In MKTd02 leaf mode specifically, it is derived internally as `ic_cdk::caller().as_slice().to_vec()`.
+This default rule assumes the deletion/tombstone call is invoked directly on the subject canister by the authenticated data subject principal.
+If your integration uses an intermediary/orchestrator canister for c2c deletion calls, review and adapt `record_id` derivation for that architecture.
 
 ## ICP Platform Constraint (A→B→C)
 

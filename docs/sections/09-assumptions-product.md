@@ -7,3 +7,4 @@
 | **A1** | Deletion is triggered by an authorised call. | No CDC, no polling, no external trigger. The caller initiates the request. |
 | **A2** | State hash is continuously maintained. | `refresh_state_hash()` after every PII write. No separate pre-delete capture step. |
 | **A3** | Canister holds data for a single data subject (Leaf mode). | Multi-subject canisters need MKTd03 (Tree mode). |
+| **A4** | Leaf-mode default `record_id` derivation assumes direct subject-to-canister invocation at deletion time. | In mediated/orchestrated c2c deletion paths, `caller()` may be the intermediary principal; integrators must review or override `record_id` derivation for that design. |

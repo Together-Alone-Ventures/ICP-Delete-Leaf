@@ -1,6 +1,6 @@
 ## Stable Memory Coordination
 
-MKTd02 reserves 7 contiguous memory slots from a configurable base (`base_memory_id`, default `100`).
+MKTd02 reserves 8 contiguous memory slots from a configurable base (`base_memory_id`, default `100`).
 
 | Offset | Content | Type | Notes |
 |---|---|---|---|

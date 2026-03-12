@@ -18,7 +18,7 @@ The reference verifier provides V2 verification paths for MKTd02 receipts.
 Current behavior is intentionally strict:
 
 - New MKTd02 receipts are `protocol_version = "mktd02-v3"`.
-- Pending receipts (no embedded certificate yet) use a live certified-query path as secondary corroboration/fallback.
+- Pending receipts (no embedded certificate yet) rely on a live certified-query path until finalized.
 - Finalized receipts are expected to carry `bls_certificate` and `trust_root_key_id` and use the embedded-certificate path as the primary long-term evidentiary route.
 - In archived receipt-contained verification, only freshness-at-verification-time is intentionally relaxed.
 - Signature authenticity, delegation trust, canister authorization, and certified-data commitment matching are still verified.

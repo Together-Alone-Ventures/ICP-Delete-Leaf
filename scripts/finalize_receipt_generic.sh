@@ -115,7 +115,7 @@ if [[ "$MODE" == "factory" ]]; then
 fi
 
 echo "[*] Checking pending state..."
-PENDING_JSON=$("${DFX[@]}" canister call "$PROFILE" mktd_is_pending --output json --query --network "$NETWORK")
+PENDING_JSON=$("${DFX[@]}" canister --network "$NETWORK" call "$PROFILE" mktd_is_pending --output json --query)
 
 python3 - "$PENDING_JSON" <<'PY'
 import json, sys
@@ -161,7 +161,7 @@ elif [[ $status -ne 0 ]]; then
 fi
 
 echo "[*] Fetching certificate..."
-CERT_JSON=$("${DFX[@]}" canister call "$PROFILE" mktd_get_certificate --output json --query --network "$NETWORK")
+CERT_JSON=$("${DFX[@]}" canister --network "$NETWORK" call "$PROFILE" mktd_get_certificate --output json --query)
 
 PARSED=$(python3 - "$CERT_JSON" <<'PY'
 import json, sys
@@ -266,19 +266,17 @@ echo "[*] Certificate length: $CERT_LEN bytes"
 
 if [[ "$MODE" == "factory" ]]; then
   echo "[*] Finalizing via factory proxy..."
-"${DFX[@]}" canister call "$FACTORY" finalize_profile_receipt \
-  "(principal \"$PROFILE\", \"$RECEIPT_ID\", $CERT_ARG)" \
-  --network "$NETWORK"
+"${DFX[@]}" canister --network "$NETWORK" call "$FACTORY" finalize_profile_receipt \
+  "(principal \"$PROFILE\", \"$RECEIPT_ID\", $CERT_ARG)"
 
 else
   echo "[*] Finalizing directly on profile canister..."
-"${DFX[@]}" canister call "$PROFILE" mktd_finalize_receipt \
-  "(\"$RECEIPT_ID\", $CERT_ARG)" \
-  --network "$NETWORK"
+"${DFX[@]}" canister --network "$NETWORK" call "$PROFILE" mktd_finalize_receipt \
+  "(\"$RECEIPT_ID\", $CERT_ARG)"
 fi
 
 echo "[*] Re-checking pending state..."
-PENDING2_JSON=$("${DFX[@]}" canister call "$PROFILE" mktd_is_pending --output json --query --network "$NETWORK")
+PENDING2_JSON=$("${DFX[@]}" canister --network "$NETWORK" call "$PROFILE" mktd_is_pending --output json --query)
 
 python3 - "$PENDING2_JSON" <<'PY'
 import json, sys

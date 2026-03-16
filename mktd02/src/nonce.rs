@@ -32,7 +32,3 @@ pub(crate) fn increment_deletion_seq() -> u64 {
     })
 }
 
-/// Read the current deletion sequence value without incrementing.
-pub(crate) fn current_deletion_seq() -> u64 {
-    crate::storage::with_storage(|s| s.deletion_seq.get().0)
-}

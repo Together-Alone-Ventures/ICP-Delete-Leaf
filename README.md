@@ -74,6 +74,37 @@ This should not be read as a blanket RFC 8949 canonical-CBOR equivalence claim.
 - `CVDR-Verify` — verifier/reference verification tooling
 - `DaffyDefs` — worked example/template integration
 
+## Updating the Integration Guide
+
+`MKTd02_Integration_Guide.md` at the repo root is a **generated file**.
+Do not edit it directly — changes will be overwritten on the next compose run.
+
+**Source files:**
+- Section content lives in `docs/sections/` (local) and
+  `zombie-delete-docs` (shared platform content, pinned in `docs/compose.yaml`)
+- Section order and structure is defined in `docs/compose.yaml`
+
+**To rebuild after changing any section file:**
+```bash
+# Requires a local clone of zombie-delete-docs at the pinned ref
+git clone --depth 1 --branch v1.0.3 \
+  https://github.com/Together-Alone-Ventures/zombie-delete-docs.git \
+  /tmp/shared-docs
+
+pip install pyyaml
+python3 docs/scripts/compose.py /tmp/shared-docs docs/compose.yaml
+
+# Commit the result
+git add MKTd02_Integration_Guide.md
+git commit -m "docs: recompose Integration Guide"
+git push
+```
+
+The GitHub Action (`.github/workflows/build-guide.yml`) also runs the
+compose step on release and produces a downloadable PDF artifact, but
+does not commit the output — the committed markdown is the canonical
+repo artifact.
+
 ## Status
 
 Current protocol line in this repository: v0.3.x (Leaf mode).

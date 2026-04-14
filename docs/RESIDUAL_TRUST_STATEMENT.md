@@ -1,3 +1,5 @@
+**Sync note:** The residual trust table and mitigations in this document are kept in sync with `docs/sections/12-residual-trust.md`, which is the Integration Guide source for the same material. If you update one, update the other.
+
 # MKTd02 Residual Trust Statement
 
 **Protocol:** MKTd02 v0.3.x (Leaf mode)  

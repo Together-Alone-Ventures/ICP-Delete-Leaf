@@ -21,6 +21,4 @@ target
 #.idea/
 
 # Composed integration guide (build artifact)
-MKTd02_Integration_Guide.md
-MKTd02_Integration_Guide.pdf
 __pycache__/

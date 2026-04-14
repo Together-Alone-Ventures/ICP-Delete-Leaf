@@ -63,6 +63,10 @@ sections:
       append: shared/icp/assumptions-platform.md
     strip_heading: true
 
-  - heading: "# 7. Verification"
+- heading: "# 7. Residual Trust Statement"
+    local: 12-residual-trust.md
+    strip_heading: true
+
+  - heading: "# 8. Verification"
     local: 10-verification.md
     strip_heading: true

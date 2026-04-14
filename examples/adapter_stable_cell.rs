@@ -25,7 +25,6 @@
 // Adapt this pattern for your own canister.
 
 use mktd02::trait_def::{CommitMode, MKTdDataSource};
-use zombie_core::manifest::{compute_manifest_hash, FieldDescriptor};
 use zombie_core::serialisation::encode_pii_state;
 use zombie_core::tombstone::tombstone_constant;
 use serde::{Deserialize, Serialize};
@@ -74,10 +73,6 @@ impl MKTdDataSource for ProfileAdapter {
                 field_order: 3,
             },
         ]
-    }
-
-    fn manifest_hash(&self) -> [u8; 32] {
-        compute_manifest_hash(&self.pii_field_manifest())
     }
 
     fn get_state_bytes(&self) -> Vec<u8> {

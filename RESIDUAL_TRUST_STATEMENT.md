@@ -1,4 +1,4 @@
-**Sync note:** The residual trust table and mitigations in this document are kept in sync with `docs/sections/12-residual-trust.md`, which is the Integration Guide source for the same material. If you update one, update the other.
+**Sync note:** `docs/sections/12-residual-trust.md` is the source of truth for the residual trust table and mitigations. This document is the DPO/auditor-facing version of the same material. If `12-residual-trust.md` is updated, this document must be updated to match.
 
 # MKTd02 Residual Trust Statement
 

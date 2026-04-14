@@ -1,3 +1,5 @@
+<!-- GENERATED FILE — do not edit directly. Source: docs/sections/ + docs/compose.yaml. See README.md for rebuild instructions. -->
+
 # MKTd02 Integration Guide
 
 **Version 3.0** · Updated 27 February 2026

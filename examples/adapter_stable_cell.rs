@@ -26,11 +26,6 @@
 
 use mktd02::trait_def::{CommitMode, MKTdDataSource};
 use zombie_core::FieldDescriptor;
-```
-
-You can do that directly in the GitHub editor — it's a single line addition. Then commit with:
-```
-fix: restore FieldDescriptor import in adapter_stable_cell.rs example
 use zombie_core::serialisation::encode_pii_state;
 use zombie_core::tombstone::tombstone_constant;
 use serde::{Deserialize, Serialize};

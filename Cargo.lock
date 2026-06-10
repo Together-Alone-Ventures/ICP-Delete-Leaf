@@ -707,7 +707,7 @@ checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
 [[package]]
 name = "zombie-core"
 version = "0.3.0"
-source = "git+https://github.com/Together-Alone-Ventures/zombie-core?rev=75efe6a1f618d921cf259958d275ffe3d46b6f4a#75efe6a1f618d921cf259958d275ffe3d46b6f4a"
+source = "git+https://github.com/Together-Alone-Ventures/zombie-core?tag=zombie-core-v0.3.1#508f2f8bb88f4395293168c6ef25c92a67dee894"
 dependencies = [
  "candid",
  "ciborium",

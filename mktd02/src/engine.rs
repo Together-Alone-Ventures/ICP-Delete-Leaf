@@ -40,7 +40,30 @@ impl core::fmt::Display for DeletionError {
     }
 }
 
-/// Execute the full deletion flow (Phase A). Returns the receipt_id on success.
+/// Execute the full deletion flow (Phase A) using the caller-derived
+/// `record_id`. Returns the receipt_id on success.
+///
+/// Thin wrapper: derives `record_id` from
+/// `ic_cdk::caller().as_slice().to_vec()` — exactly as the engine did
+/// previously — then delegates to [`execute_deletion_with_record_id`].
+///
+/// After this call succeeds, the **finalization lock is held**. No
+/// code path may change certified data until `finalize_receipt()` is
+/// called. This is a hard invariant enforced in `publish_certified_commitment`.
+pub fn execute_deletion<A: MKTdDataSource>(
+    adapter: &mut A,
+    config: &MktdConfig,
+) -> Result<[u8; 32], DeletionError> {
+    let record_id = ic_cdk::caller().as_slice().to_vec();
+    execute_deletion_with_record_id(adapter, config, record_id)
+}
+
+/// Execute the full deletion flow (Phase A) with a **host-supplied**
+/// `record_id`. Returns the receipt_id on success.
+///
+/// `record_id` is treated as **opaque bytes**: it is stored in the receipt
+/// and fed into `compute_receipt_id` verbatim. The engine does not hash,
+/// parse, validate, or otherwise reinterpret it (P0 contract).
 ///
 /// The receipt is created with `bls_certificate: None` and
 /// `trust_root_key_id: String::new()`. These fields are populated during
@@ -49,9 +72,10 @@ impl core::fmt::Display for DeletionError {
 /// After this call succeeds, the **finalization lock is held**. No
 /// code path may change certified data until `finalize_receipt()` is
 /// called. This is a hard invariant enforced in `publish_certified_commitment`.
-pub fn execute_deletion<A: MKTdDataSource>(
+pub fn execute_deletion_with_record_id<A: MKTdDataSource>(
     adapter: &mut A,
     _config: &MktdConfig,
+    record_id: Vec<u8>,
 ) -> Result<[u8; 32], DeletionError> {
     // (a) Validate not tombstoned
     if crate::guard::is_tombstoned() {
@@ -79,8 +103,8 @@ pub fn execute_deletion<A: MKTdDataSource>(
     let post_state_hash = compute_state_hash(&adapter.get_state_bytes());
 
     // (e) Increment deletion sequence
+    //     `record_id` is host-supplied (opaque bytes) — see fn signature.
     let deletion_seq = increment_deletion_seq();
-    let record_id = ic_cdk::caller().as_slice().to_vec();
 
     // (f) Compute tombstone_hash
     let tombstone_hash = hash_with_tag(TAG_TOMBSTONE_HASH, &[
@@ -219,4 +243,31 @@ pub(crate) fn first_init<A: MKTdDataSource>(
             .set(meta)
             .expect("MKTd02: failed to store meta cell");
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use candid::Principal;
+    use zombie_core::receipt::compute_receipt_id;
+
+    // Locks the LIVE v3 receipt-id formula: `record_id` IS part of the
+    // receipt_id preimage (see zombie_core::receipt::compute_receipt_id). This
+    // is a pure check — no IC runtime needed — and the source of truth behind
+    // the "record_id is bound into receipt identity" finding.
+    #[test]
+    fn receipt_id_is_sensitive_to_record_id() {
+        let canister_id = Principal::from_slice(&[0xCA, 0xFE, 0x01]);
+        let seq = 1u64;
+
+        let a = compute_receipt_id(&canister_id, b"subject-A", seq);
+        let b = compute_receipt_id(&canister_id, b"subject-B", seq);
+        assert_ne!(
+            a, b,
+            "distinct record_id must yield distinct receipt_id (record_id is in the v3 preimage)"
+        );
+
+        // Deterministic for fixed inputs.
+        let a_again = compute_receipt_id(&canister_id, b"subject-A", seq);
+        assert_eq!(a, a_again, "receipt_id must be deterministic for fixed inputs");
+    }
 }

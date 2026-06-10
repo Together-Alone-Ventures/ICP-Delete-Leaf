@@ -167,19 +167,69 @@ pub fn finalize_receipt(
     receipt_id: &[u8; 32],
     certificate: Vec<u8>,
 ) -> Result<(), FinalizationError> {
-    // Guard 1: finalization lock must be held
-    let expected_id = match read_pending_receipt_id() {
-        Some(id) => id,
-        None => return Err(FinalizationError::NoPendingReceipt),
-    };
+    // Guard 1: finalization lock must be held.
+    //
+    // Checked ahead of the controller guard to preserve the original
+    // observable ordering (NoPendingReceipt is reported before NotController).
+    if read_pending_receipt_id().is_none() {
+        return Err(FinalizationError::NoPendingReceipt);
+    }
 
-    // Guard 2: caller must be a controller
+    // Guard 2: caller must be a controller.
     let caller = ic_cdk::caller();
     if !ic_cdk::api::is_controller(&caller) {
         return Err(FinalizationError::NotController);
     }
 
-    // Guard 3: receipt_id must match
+    // Remaining guards (lock / id-match / already-finalized) + embed/store/release.
+    finalize_locked_receipt(receipt_id, certificate)
+}
+
+/// Phase C finalize **after host-side authorization** — performs **no
+/// caller/controller check**.
+///
+/// # SECURITY — READ BEFORE USE
+///
+/// This function embeds the certificate into the pending receipt and releases
+/// the finalization lock for **any** caller. It performs **no caller or
+/// controller authorization** of its own. The host (the delete-pipeline
+/// orchestrator) **MUST** have already completed its own authorization of the
+/// deletion subject **before** invoking this function. Calling it without that
+/// prior authorization lets an unauthenticated party finalize a pending receipt.
+///
+/// **This is crate / library API only. It MUST NOT be exposed directly as a
+/// Candid `#[update]` (or any other) canister method.** Wire it only behind
+/// host-side authorization that runs first.
+///
+/// Behaviour is otherwise identical to [`finalize_receipt`] minus the
+/// controller guard: same `NoPendingReceipt` / `ReceiptIdMismatch` /
+/// `AlreadyFinalized` semantics, and the finalization lock is released on success.
+pub fn finalize_receipt_after_host_authorization(
+    receipt_id: &[u8; 32],
+    certificate: Vec<u8>,
+) -> Result<(), FinalizationError> {
+    finalize_locked_receipt(receipt_id, certificate)
+}
+
+/// Shared finalize core: lock / id-match / already-finalized guards, then
+/// embed the certificate + NNS root key id, re-encode, store, and release the
+/// finalization lock.
+///
+/// **Contains no caller/controller check.** Authorization is the caller's
+/// responsibility: the controller check lives in [`finalize_receipt`]; the
+/// host-authorization contract lives in
+/// [`finalize_receipt_after_host_authorization`].
+fn finalize_locked_receipt(
+    receipt_id: &[u8; 32],
+    certificate: Vec<u8>,
+) -> Result<(), FinalizationError> {
+    // Guard: finalization lock must be held
+    let expected_id = match read_pending_receipt_id() {
+        Some(id) => id,
+        None => return Err(FinalizationError::NoPendingReceipt),
+    };
+
+    // Guard: receipt_id must match
     if receipt_id != &expected_id {
         return Err(FinalizationError::ReceiptIdMismatch {
             expected: hex::encode(expected_id),
@@ -202,7 +252,7 @@ pub fn finalize_receipt(
             format!("failed to decode pending receipt: {e}")
         ))?;
 
-    // Guard 4: must not already be finalized
+    // Guard: must not already be finalized
     if receipt.bls_certificate.is_some() {
         return Err(FinalizationError::AlreadyFinalized);
     }
@@ -236,18 +286,52 @@ pub fn is_pending_finalization() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::read_pending_receipt_id;
+    use super::{finalize_receipt_after_host_authorization, read_pending_receipt_id, FinalizationError};
     use crate::nonce::increment_deletion_seq;
     use crate::storage::{
-        acquire_finalization_lock, pending_receipt_id, release_finalization_lock,
-        set_pending_receipt_id, setup_storage,
+        acquire_finalization_lock, is_finalization_locked, pending_receipt_id,
+        release_finalization_lock, set_pending_receipt_id, setup_storage, with_storage,
+        with_storage_mut, Hash32, ReceiptBytes,
     };
+    use candid::Principal;
     use ic_stable_structures::memory_manager::MemoryManager;
     use ic_stable_structures::DefaultMemoryImpl;
+    use zombie_core::receipt::{DeletionReceipt, ProtocolVersion};
 
     fn setup_test_storage(base: u8) {
         let mm = MemoryManager::init(DefaultMemoryImpl::default());
         setup_storage(&mm, base);
+    }
+
+    /// Build a pending (un-finalized) receipt and place it in storage under
+    /// `receipt_id`. `bls_certificate` is `None`, mimicking a Phase-A receipt.
+    fn insert_pending_receipt(receipt_id: [u8; 32]) {
+        let receipt = DeletionReceipt {
+            protocol_version: ProtocolVersion::V3.into(),
+            receipt_id,
+            canister_id: Principal::anonymous(),
+            record_id: vec![1, 2, 3],
+            pre_state_hash: [0u8; 32],
+            post_state_hash: [0u8; 32],
+            tombstone_hash: [0u8; 32],
+            deletion_event_hash: [0u8; 32],
+            certified_commitment: [0u8; 32],
+            module_hash: [0u8; 32],
+            timestamp: 0,
+            deletion_seq: 0,
+            bls_certificate: None,
+            trust_root_key_id: String::new(),
+        };
+        let mut buf = Vec::new();
+        ciborium::into_writer(&receipt, &mut buf).unwrap();
+        with_storage_mut(|s| {
+            s.receipts.insert(Hash32(receipt_id), ReceiptBytes(buf));
+        });
+    }
+
+    fn load_receipt(receipt_id: [u8; 32]) -> DeletionReceipt {
+        let bytes = with_storage(|s| s.receipts.get(&Hash32(receipt_id))).unwrap();
+        ciborium::from_reader(bytes.0.as_slice()).unwrap()
     }
 
     #[test]
@@ -266,5 +350,71 @@ mod tests {
         assert_eq!(pending_receipt_id(), Some(pending_id));
 
         release_finalization_lock();
+    }
+
+    // --- A2: host-authorized finalize (no controller check) ---------------
+    // These exercise `finalize_receipt_after_host_authorization`, which shares
+    // its entire body — via the private `finalize_locked_receipt` helper — with
+    // the controller-guarded `finalize_receipt`. They run on the host because
+    // this path touches no `ic_cdk` runtime calls.
+
+    #[test]
+    fn host_auth_finalize_succeeds_and_releases_lock() {
+        setup_test_storage(110);
+        let rid = [0x11; 32];
+        insert_pending_receipt(rid);
+        acquire_finalization_lock();
+        set_pending_receipt_id(rid);
+
+        let res = finalize_receipt_after_host_authorization(&rid, vec![0xAA, 0xBB]);
+        assert!(res.is_ok(), "expected Ok, got {res:?}");
+        assert!(!is_finalization_locked(), "lock must be released after finalize");
+
+        let decoded = load_receipt(rid);
+        assert_eq!(decoded.bls_certificate, Some(vec![0xAA, 0xBB]));
+        assert_eq!(decoded.trust_root_key_id, zombie_core::nns_keys::active_key_id());
+    }
+
+    #[test]
+    fn host_auth_mismatch_returns_receipt_id_mismatch() {
+        setup_test_storage(111);
+        let rid = [0x22; 32];
+        insert_pending_receipt(rid);
+        acquire_finalization_lock();
+        set_pending_receipt_id(rid);
+
+        let res = finalize_receipt_after_host_authorization(&[0x33; 32], vec![0x01]);
+        assert!(
+            matches!(res, Err(FinalizationError::ReceiptIdMismatch { .. })),
+            "got {res:?}"
+        );
+        assert!(is_finalization_locked(), "lock must stay held on mismatch");
+    }
+
+    #[test]
+    fn host_auth_no_lock_returns_no_pending_receipt() {
+        setup_test_storage(112);
+        // No lock acquired, no pending id set.
+        let res = finalize_receipt_after_host_authorization(&[0x44; 32], vec![0x01]);
+        assert!(matches!(res, Err(FinalizationError::NoPendingReceipt)), "got {res:?}");
+    }
+
+    #[test]
+    fn host_auth_double_finalize_returns_already_finalized() {
+        setup_test_storage(113);
+        let rid = [0x55; 32];
+        insert_pending_receipt(rid);
+        acquire_finalization_lock();
+        set_pending_receipt_id(rid);
+
+        // First finalize succeeds and releases the lock.
+        finalize_receipt_after_host_authorization(&rid, vec![0x01]).expect("first finalize ok");
+
+        // Re-acquire the lock pointing at the now-finalized receipt; the
+        // second attempt must hit the already-finalized guard.
+        acquire_finalization_lock();
+        set_pending_receipt_id(rid);
+        let res = finalize_receipt_after_host_authorization(&rid, vec![0x02]);
+        assert!(matches!(res, Err(FinalizationError::AlreadyFinalized)), "got {res:?}");
     }
 }

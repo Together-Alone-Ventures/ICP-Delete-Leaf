@@ -1,0 +1,25 @@
+[package]
+name = "mktd02-harness"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Self-contained workspace so this test-only harness does NOT perturb the root
+# workspace's Cargo.lock. It keeps its own harness/Cargo.lock.
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+mktd02 = { path = "../mktd02" }
+# Same source/pin as mktd02 so zombie-core types unify (single crate in graph).
+zombie-core = { git = "https://github.com/Together-Alone-Ventures/zombie-core", tag = "zombie-core-v0.3.1" }
+ic-cdk = "0.17"
+ic-stable-structures = "0.6"
+candid = "0.10"
+serde = { version = "1", features = ["derive"] }
+hex = "0.4"
+
+[dev-dependencies]
+pocket-ic = "11.0.0"

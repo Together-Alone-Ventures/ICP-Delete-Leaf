@@ -126,6 +126,20 @@ pub fn execute_deletion<A: MKTdDataSource>(
     engine::execute_deletion(adapter, config)
 }
 
+/// Execute deletion with a **host-supplied** `record_id` (Phase A).
+///
+/// Identical to [`execute_deletion`] except `record_id` is supplied by the
+/// caller instead of being derived from `ic_cdk::caller()`. The `record_id`
+/// is treated as opaque bytes — stored in the receipt and fed into the
+/// receipt-id computation verbatim, with no hashing, parsing, or validation.
+pub fn execute_deletion_with_record_id<A: MKTdDataSource>(
+    adapter: &mut A,
+    config: &MktdConfig,
+    record_id: Vec<u8>,
+) -> Result<[u8; 32], DeletionError> {
+    engine::execute_deletion_with_record_id(adapter, config, record_id)
+}
+
 // ---------------------------------------------------------------------------
 // Public API — Certificate Retrieval (Phase B)
 // ---------------------------------------------------------------------------
@@ -172,6 +186,23 @@ pub fn finalize_receipt(
     certificate: Vec<u8>,
 ) -> Result<(), FinalizationError> {
     finalization::finalize_receipt(receipt_id, certificate)
+}
+
+/// Host-authorized Phase C finalize — **no controller check** (Phase C).
+///
+/// # SECURITY
+///
+/// Performs **no caller/controller check**. The host delete-pipeline **MUST**
+/// complete its own authorization of the deletion subject **before** calling
+/// this. **Crate/library API only — do NOT expose it directly as a Candid
+/// `#[update]` method.** See
+/// [`finalization::finalize_receipt_after_host_authorization`] for the full
+/// security contract.
+pub fn finalize_receipt_after_host_authorization(
+    receipt_id: &[u8; 32],
+    certificate: Vec<u8>,
+) -> Result<(), FinalizationError> {
+    finalization::finalize_receipt_after_host_authorization(receipt_id, certificate)
 }
 
 /// Check whether a receipt is pending finalization.

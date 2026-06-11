@@ -1,0 +1,113 @@
+# P0.x — MKTd02 Engine v0.4.1 Re-Pin — BUILD PACKET
+
+**Type:** Build packet (P0.x, high-assurance). **Status:** READY — G-authorized 2026-06-11 (re-pin APPROVED,
+patch-class conditional).
+**Repo:** `ICP-Delete-Leaf` (MKTd02 engine) — and `zombie-core` if the dep graph requires it (see W1).
+**Grounding:** `v0.4.1_RePin_Decision_Request` RESOLVED (G rulings 1a–1d). Engine at tag `mktd02-v0.4.0`
+(commit `ba5cef5`); main at `ade76a9` (carries the build-guide permissions fix). Triggered by Divergence #1
+(CC's P1 pass): the engine's ic-cdk 0.17 / is 0.6 pins collide with OpenChatZD's 0.18 / 0.7.
+**Execution:** CC inspect-and-propose → Claude + CD diff review → human-in-the-loop commit. ICP-Delete-Leaf
+`.claude` gates apply — commit / push / tag route through the review ladder.
+
+---
+
+## ⛔ Prime directive (G ruling 1d — halt-and-report)
+
+This is a **conditional patch**. The re-pin is **dependency / API-compatibility work only**. It must
+preserve:
+- the **public canister API** — Candid interface unchanged;
+- the **receipt schema** — CVDR field set + encoding;
+- the **hash formulas** — every preimage / domain-separated hash input;
+- the **8-slot stable-memory layout** — MemoryIds 100–107, incl. base+5 `finalization_lock`, base+6
+  receipt store, base+7 `tombstoned_at` — *including the serialized encoding of each stable structure's
+  contents*.
+
+If any adaptation needed to compile under ic-cdk 0.18 / is-0.7 would change **any** of the above,
+**STOP and report**. It is then no longer a v0.4.1 patch and routes to a broader gate / new version line.
+Do **not** silently absorb such a change to make it build.
+
+---
+
+## Objective
+
+Re-pin the engine to **ic-cdk 0.18 + ic-stable-structures 0.7** so the host (OpenChatZD, DaffyDefs) can share
+a single `MemoryManager<DefaultMemoryImpl>` across the `mktd02::init` boundary without the
+`links = "ic-cdk async executor"` collision or the is-0.6 ≠ is-0.7 type mismatch. Release as
+**`mktd02-v0.4.1`**.
+
+## Work items
+
+**W1 — Dependency-graph inspection (do this first).**
+- Map which crates in the engine workspace and in `zombie-core` pull `ic-cdk` / `ic-stable-structures`.
+- Determine whether `zombie-core` (currently v0.3.1) carries these deps and therefore needs its own
+  re-pin + tag *before* the engine can bump (zombie-core → new tag → engine re-points). Report the chain
+  **before** touching any manifest.
+
+**W2 — Manifest bump.**
+- Bump `ic-cdk` 0.17 → 0.18 and `ic-stable-structures` 0.6 → 0.7 across the workspace (and `zombie-core`
+  if W1 requires). No other dependency changes unless forced by the bump — report any that are.
+
+**W3 — Compile-adaptation (every change checked against the Prime Directive).**
+Expect breaking surfaces; inspect and adapt **only** as needed to compile:
+- **is 0.6→0.7 `Storable` / `Bound`:** the `Storable` trait changed (bound handling moved into the trait).
+  Any migration **must keep `to_bytes` / `from_bytes` byte-identical** for the stable structures — confirm
+  the on-disk encoding of `finalization_lock`, the receipt store, and `tombstoned_at` is unchanged. An
+  encoding change = layout/schema change = **HALT (1d)**.
+- **`MemoryManager` / `StableCell` / `StableBTreeMap` API:** adapt call sites; confirm slot assignments
+  100–107 are identical.
+- **ic-cdk 0.17→0.18:** `api` module / macros / candid-export surface. Diff the generated `.did` and
+  confirm it is **identical**; any change to the public interface = **HALT (1d)**.
+- For each adaptation, the proposal must state: what changed, why, and the evidence it did **not** touch
+  API / schema / hash / layout.
+
+**W4 — Cargo.lock.**
+- Update `Cargo.lock` deliberately for the new graph, as its **own commit**, separate from the W2/W3 source
+  changes.
+- Fold in the known pre-existing **stale-vs-manifest** `Cargo.lock` mismatch fix here (parked, owed a
+  deliberate commit before the release tag).
+
+**W5 — Build + engine tests.**
+- Clean `cargo build` / `cargo check` on the new graph.
+- Engine lib tests **9/9** + PocketIC harness **3/3** green under the new deps. (Known off-wasm-only gaps —
+  e.g. controller-guard, A1 parity — keep their existing limitations; they're covered in E4-lite via
+  PocketIC + reasoning.)
+
+## Exit gate — E4-lite (G ruling 1c, required)
+
+After W5 is green, a **focused** re-confirmation (not a full re-audit) that v0.4.1 preserves:
+- receipt-id binding;
+- finalization lock / single-shot behaviour;
+- no-lock / mismatch / double-finalize error behaviour;
+- controller-path behaviour incl. guard ordering;
+- A2 host-authorized path behaviour;
+- stable-memory slot map 100–107 (esp. base+5 / +6 / +7);
+- (sets up) DaffyDefs compat.
+
+Reviewers: Claude + G (CD optional). The full adversarial model is **not** reopened unless W1–W3 surfaced a
+forced protocol / schema / hash / API / layout change — which would itself have tripped 1d.
+
+## Release + follow-on
+
+- **R1 — Release `mktd02-v0.4.1`:** tag from a commit descending `ade76a9` so the build-guide permissions
+  fix is present and the Integration Guide auto-attaches this time; Arweave archival via the CI gate +
+  RELEASES.md linter; confirm the guide attached.
+- **R2 — DaffyDefs (G ruling 1b):** move DaffyDefs to v0.4.1 / is-0.7, build-verify and re-run its proof
+  pass. Single engine line — no v0.4.0 fork maintained.
+- **R3 — Unblock OpenChatZD P1:** re-point P1's engine pin to v0.4.1; *then* the P1 build / test / review
+  proceeds (separate packet).
+
+## Out of scope (HALT-and-report if encountered)
+- Any protocol / receipt-schema / hash-formula / public-API / stable-memory-layout change (→ 1d, broader
+  gate / new version line).
+- Full V3 module-hash wiring → **P1A — Module-Hash Wiring / V3 Enablement** (separate packet, G 3b).
+- OpenChatZD P1 source changes (they re-point *after* v0.4.1 exists).
+
+## Acceptance conditions (all required before P1 re-points)
+1. Workspace (+ `zombie-core` if applicable) builds clean on ic-cdk 0.18 / is 0.7.
+2. **1d attested with evidence:** Candid diff empty; stable-structure encodings byte-identical; slot map
+   100–107 unchanged; no public-API / schema / hash change.
+3. lib 9/9 + PocketIC 3/3 green.
+4. E4-lite (1c) passes.
+5. `Cargo.lock` deliberate-committed + stale-vs-manifest fixed.
+6. `mktd02-v0.4.1` tagged + Arweave-archived + guide attached.
+7. DaffyDefs moved to v0.4.1 + compat-verified (1b).

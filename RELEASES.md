@@ -6,7 +6,31 @@ Records release provenance for the `mktd02` library crate, supporting V3 (Canist
 
 ## Current line
 
-`mktd02-v0.4.0` (Leaf mode). Supersedes the v0.3.x line; the earlier v0.2.x line is historical.
+`mktd02-v0.4.1` (Leaf mode; dependency re-pin of v0.4.0). Supersedes the v0.3.x line; the earlier v0.2.x line is historical.
+
+## mktd02-v0.4.1 — library reproducibility inputs
+
+| Field | Value |
+|---|---|
+| Repo | Together-Alone-Ventures/ICP-Delete-Leaf |
+| Tag | mktd02-v0.4.1 (annotated; GitHub Release published) |
+| Commit | the commit mktd02-v0.4.1 points to (resolve via `git rev-parse mktd02-v0.4.1`) |
+| Crate versions | mktd02 0.4.1, mktd02-macros 0.4.1 (workspace-inherited, lockstep) |
+| zombie-core dependency | tag zombie-core-v0.3.1, commit 508f2f8bb88f4395293168c6ef25c92a67dee894 (unchanged from v0.4.0) |
+| Rust toolchain | rustc 1.90.0 (1159e78c4 2025-09-14); cargo 1.90.0 (840b83a10 2025-07-30); stable-x86_64-unknown-linux-gnu |
+| Feature posture | default features (default = []); local-replica OFF (must never be enabled in release/prod) |
+| Deployment / reference-canister module hash | not applicable at library level — see Reference integration artifact |
+
+Scope: dependency re-pin only — ic-cdk 0.17.2 -> 0.18.x, ic-stable-structures 0.6.9 -> 0.7.2. Patch-class under the 1d test: public Rust API, receipt schema, hash formulas, and the 8-slot stable-memory layout (100-107) unchanged; on-disk encodings byte-compatible for the bound shapes in use. E4-lite signed off (G); independent reviews: Claude + CD (CD re-ran full build/test green). Evidence: MKTd02_v0.4.1_RePin_Deliverable.md.
+
+Build / test commands run, with results:
+
+- `cargo build --locked` — pass
+- `cargo test -p mktd02 --locked` — 9 passed / 0 failed (mktd02 lib unit tests)
+- `cargo build --locked --target wasm32-unknown-unknown` — clean
+- PocketIC harness (harness/, separate workspace, own lock) — 3/3 passed: A1 wrapper parity, A2 host-supplied record_id, two-cell controller guard
+
+Integration Guide regeneration: publishing the GitHub Release triggers .github/workflows/build-guide.yml, which regenerates and attaches MKTd02_Integration_Guide.md (the permissions fix is on this commit line, so the attach is expected to succeed).
 
 ## mktd02-v0.4.0 — library reproducibility inputs
 
@@ -33,7 +57,7 @@ Integration Guide regeneration: publishing the GitHub Release triggers .github/w
 
 ## Reference integration artifact — DaffyDefs (pending)
 
-To be completed after the DaffyDefs mktd02-v0.3.1 -> v0.4.0 bump and build-compat regression, which produce a deployed reference-canister module hash:
+To be completed after the DaffyDefs bump to mktd02-v0.4.1 and build-compat regression (R2), which produce a deployed reference-canister module hash. (The v0.4.0 reference artifact was never recorded; superseded by v0.4.1.)
 
 | Field | Value |
 |---|---|

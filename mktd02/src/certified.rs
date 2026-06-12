@@ -44,11 +44,12 @@ pub(crate) fn publish_certified_commitment(
 
     let commitment = compute_certified_commitment(state_hash, deletion_event_hash);
     with_storage_mut(|s| {
-        s.certified_commitment
-            .set(Hash32(commitment))
-            .expect("MKTd02: failed to store certified_commitment");
+        s.certified_commitment.set(Hash32(commitment));
     });
-    ic_cdk::api::set_certified_data(&commitment);
+    // ic-cdk 0.18: `set_certified_data(&[u8])` → `certified_data_set(AsRef<[u8]>)`.
+    // Both call the identical `ic0::certified_data_set` syscall with the same 32
+    // bytes — the V2 / Phase-B certified-data path is behaviour-identical.
+    ic_cdk::api::certified_data_set(commitment);
     commitment
 }
 

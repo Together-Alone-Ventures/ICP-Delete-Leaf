@@ -13,7 +13,9 @@ use zombie_core::hashing::{hash_with_tag, sha256_concat, TAG_SALT};
 
 /// Derive the per-canister salt. Deterministic from canister_id.
 pub(crate) fn compute_salt() -> [u8; 32] {
-    hash_with_tag(TAG_SALT, &[ic_cdk::id().as_slice()])
+    // ic-cdk 0.18: `ic_cdk::id()` → `ic_cdk::api::canister_self()` (same ic0
+    // canister_self syscall). The salt preimage bytes are unchanged.
+    hash_with_tag(TAG_SALT, &[ic_cdk::api::canister_self().as_slice()])
 }
 
 /// Compute state_hash from PII state bytes.
@@ -28,9 +30,7 @@ pub(crate) fn compute_state_hash(state_bytes: &[u8]) -> [u8; 32] {
 pub(crate) fn init_state_hash(state_bytes: &[u8]) {
     let hash = compute_state_hash(state_bytes);
     with_storage_mut(|s| {
-        s.state_hash
-            .set(Hash32(hash))
-            .expect("MKTd02: failed to store initial state_hash");
+        s.state_hash.set(Hash32(hash));
     });
 }
 
@@ -38,9 +38,7 @@ pub(crate) fn init_state_hash(state_bytes: &[u8]) {
 pub(crate) fn refresh_state_hash_internal(state_bytes: &[u8]) {
     let hash = compute_state_hash(state_bytes);
     with_storage_mut(|s| {
-        s.state_hash
-            .set(Hash32(hash))
-            .expect("MKTd02: failed to update state_hash");
+        s.state_hash.set(Hash32(hash));
     });
 }
 

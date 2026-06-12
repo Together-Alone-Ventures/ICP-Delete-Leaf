@@ -57,6 +57,12 @@ impl Storable for Hash32 {
         arr.copy_from_slice(&bytes);
         Self(arr)
     }
+    // is-0.7 added `into_bytes` as a required trait method. Delegating to
+    // `to_bytes().into_owned()` guarantees the bytes WRITTEN to stable memory
+    // are byte-identical to the v0.4.0 (is-0.6) encoding — Prime-Directive safe.
+    fn into_bytes(self) -> Vec<u8> {
+        self.to_bytes().into_owned()
+    }
     const BOUND: Bound = Bound::Bounded {
         max_size: 32,
         is_fixed_size: true,
@@ -141,6 +147,9 @@ impl Storable for MetaCell {
             pending_receipt_id,
         }
     }
+    fn into_bytes(self) -> Vec<u8> {
+        self.to_bytes().into_owned()
+    }
     const BOUND: Bound = Bound::Bounded {
         max_size: 82,
         is_fixed_size: false,
@@ -157,6 +166,9 @@ impl Storable for StorableU64 {
     }
     fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
         Self(u64::from_le_bytes(bytes[0..8].try_into().unwrap()))
+    }
+    fn into_bytes(self) -> Vec<u8> {
+        self.to_bytes().into_owned()
     }
     const BOUND: Bound = Bound::Bounded {
         max_size: 8,
@@ -176,6 +188,9 @@ impl Storable for StorableBool {
     }
     fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
         Self(bytes[0] == 1)
+    }
+    fn into_bytes(self) -> Vec<u8> {
+        self.to_bytes().into_owned()
     }
     const BOUND: Bound = Bound::Bounded {
         max_size: 1,
@@ -207,6 +222,9 @@ impl Storable for OptionalTimestamp {
             Self(None)
         }
     }
+    fn into_bytes(self) -> Vec<u8> {
+        self.to_bytes().into_owned()
+    }
     const BOUND: Bound = Bound::Bounded {
         max_size: 9,
         is_fixed_size: true,
@@ -226,6 +244,9 @@ impl Storable for ReceiptBytes {
     }
     fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
         Self(bytes.to_vec())
+    }
+    fn into_bytes(self) -> Vec<u8> {
+        self.to_bytes().into_owned()
     }
     const BOUND: Bound = Bound::Bounded {
         max_size: 8192,
@@ -267,34 +288,18 @@ pub(crate) fn setup_storage(mm: &MemoryManager<DefaultMemoryImpl>, base: u8) {
         ));
     }
 
+    // is-0.7: `StableCell::init` returns `Self` (was `Result` in is-0.6); the
+    // `.expect(...)` wrappers are dropped. Slot assignments base..=base+7 and the
+    // on-disk Cell/BTreeMap format are unchanged (1d-preserving).
     let storage = MktdStorage {
-        meta: StableCell::init(mm.get(MemoryId::new(base)), MetaCell::default())
-            .expect("MKTd02: failed to init meta cell"),
-        state_hash: StableCell::init(mm.get(MemoryId::new(base + 1)), Hash32::default())
-            .expect("MKTd02: failed to init state_hash cell"),
-        deletion_seq: StableCell::init(mm.get(MemoryId::new(base + 2)), StorableU64::default())
-            .expect("MKTd02: failed to init deletion_seq cell"),
-        certified_commitment: StableCell::init(
-            mm.get(MemoryId::new(base + 3)),
-            Hash32::default(),
-        )
-        .expect("MKTd02: failed to init certified_commitment cell"),
-        deletion_event_hash: StableCell::init(
-            mm.get(MemoryId::new(base + 4)),
-            Hash32::default(),
-        )
-        .expect("MKTd02: failed to init deletion_event_hash cell"),
-        finalization_lock: StableCell::init(
-            mm.get(MemoryId::new(base + 5)),
-            StorableBool::default(),
-        )
-        .expect("MKTd02: failed to init finalization_lock cell"),
+        meta: StableCell::init(mm.get(MemoryId::new(base)), MetaCell::default()),
+        state_hash: StableCell::init(mm.get(MemoryId::new(base + 1)), Hash32::default()),
+        deletion_seq: StableCell::init(mm.get(MemoryId::new(base + 2)), StorableU64::default()),
+        certified_commitment: StableCell::init(mm.get(MemoryId::new(base + 3)), Hash32::default()),
+        deletion_event_hash: StableCell::init(mm.get(MemoryId::new(base + 4)), Hash32::default()),
+        finalization_lock: StableCell::init(mm.get(MemoryId::new(base + 5)), StorableBool::default()),
         receipts: StableBTreeMap::init(mm.get(MemoryId::new(base + 6))),
-        tombstoned_at: StableCell::init(
-            mm.get(MemoryId::new(base + 7)),
-            OptionalTimestamp::default(),
-        )
-        .expect("MKTd02: failed to init tombstoned_at cell"),
+        tombstoned_at: StableCell::init(mm.get(MemoryId::new(base + 7)), OptionalTimestamp::default()),
     };
 
     // Collision detection (belt-and-suspenders):
@@ -374,9 +379,8 @@ pub(crate) fn acquire_finalization_lock() {
         ic_cdk::trap("MKTd02: finalization lock already held — finalize the pending receipt first");
     }
     with_storage_mut(|s| {
-        s.finalization_lock
-            .set(StorableBool(true))
-            .expect("MKTd02: failed to set finalization_lock");
+        // is-0.7: `set` returns the old value (was `Result`); `.expect` dropped.
+        s.finalization_lock.set(StorableBool(true));
     });
 }
 
@@ -386,14 +390,10 @@ pub(crate) fn release_finalization_lock() {
         ic_cdk::trap("MKTd02: finalization lock not held — nothing to release");
     }
     with_storage_mut(|s| {
-        s.finalization_lock
-            .set(StorableBool(false))
-            .expect("MKTd02: failed to release finalization_lock");
+        s.finalization_lock.set(StorableBool(false));
         let mut meta = s.meta.get().clone();
         meta.pending_receipt_id = None;
-        s.meta
-            .set(meta)
-            .expect("MKTd02: failed to clear pending_receipt_id");
+        s.meta.set(meta);
     });
 }
 
@@ -402,9 +402,7 @@ pub(crate) fn set_pending_receipt_id(receipt_id: [u8; 32]) {
     with_storage_mut(|s| {
         let mut meta = s.meta.get().clone();
         meta.pending_receipt_id = Some(receipt_id);
-        s.meta
-            .set(meta)
-            .expect("MKTd02: failed to set pending_receipt_id");
+        s.meta.set(meta);
     });
 }
 

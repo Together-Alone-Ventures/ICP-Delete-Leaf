@@ -54,7 +54,9 @@ pub fn execute_deletion<A: MKTdDataSource>(
     adapter: &mut A,
     config: &MktdConfig,
 ) -> Result<[u8; 32], DeletionError> {
-    let record_id = ic_cdk::caller().as_slice().to_vec();
+    // ic-cdk 0.18: `ic_cdk::caller()` → `ic_cdk::api::msg_caller()` (same ic0
+    // msg_caller syscall, behaviour-identical).
+    let record_id = ic_cdk::api::msg_caller().as_slice().to_vec();
     execute_deletion_with_record_id(adapter, config, record_id)
 }
 
@@ -85,7 +87,9 @@ pub fn execute_deletion_with_record_id<A: MKTdDataSource>(
         return Err(DeletionError::NotInitialised);
     }
 
-    let canister_id = ic_cdk::id();
+    // ic-cdk 0.18: `ic_cdk::id()` → `ic_cdk::api::canister_self()` (same
+    // ic0 canister_self syscall, behaviour-identical).
+    let canister_id = ic_cdk::api::canister_self();
     let timestamp = ic_cdk::api::time();
 
     // (b) Capture pre_state_hash
@@ -128,16 +132,12 @@ pub fn execute_deletion_with_record_id<A: MKTdDataSource>(
     ]);
 
     // (i) Store tombstoned_at (engine-owned; see storage.rs docs)
+    // is-0.7: `StableCell::set` returns the old value (was `Result` in is-0.6);
+    // the `.expect(...)` wrappers are dropped. The written encoding is unchanged.
     with_storage_mut(|s| {
-        s.tombstoned_at
-            .set(OptionalTimestamp(Some(timestamp)))
-            .expect("MKTd02: failed to store tombstoned_at");
-        s.deletion_event_hash
-            .set(Hash32(deletion_event_hash))
-            .expect("MKTd02: failed to store deletion_event_hash");
-        s.state_hash
-            .set(Hash32(post_state_hash))
-            .expect("MKTd02: failed to store post_state_hash");
+        s.tombstoned_at.set(OptionalTimestamp(Some(timestamp)));
+        s.deletion_event_hash.set(Hash32(deletion_event_hash));
+        s.state_hash.set(Hash32(post_state_hash));
     });
 
     // (j) Compute + publish certified_commitment
@@ -198,9 +198,7 @@ pub(crate) fn upgrade_cascade<A: MKTdDataSource>(
     let state_bytes = adapter.get_state_bytes();
     let new_state_hash = compute_state_hash(&state_bytes);
     with_storage_mut(|s| {
-        s.state_hash
-            .set(Hash32(new_state_hash))
-            .expect("MKTd02: failed to update state_hash in cascade");
+        s.state_hash.set(Hash32(new_state_hash));
     });
 
     // Always republish certified_commitment
@@ -212,9 +210,7 @@ pub(crate) fn upgrade_cascade<A: MKTdDataSource>(
     with_storage_mut(|s| {
         let mut meta = s.meta.get().clone();
         meta.module_hash = module_hash;
-        s.meta
-            .set(meta)
-            .expect("MKTd02: failed to update module_hash in meta cell");
+        s.meta.set(meta);
     });
 }
 
@@ -239,9 +235,7 @@ pub(crate) fn first_init<A: MKTdDataSource>(
             module_hash,
             pending_receipt_id: None,
         };
-        s.meta
-            .set(meta)
-            .expect("MKTd02: failed to store meta cell");
+        s.meta.set(meta);
     });
 }
 

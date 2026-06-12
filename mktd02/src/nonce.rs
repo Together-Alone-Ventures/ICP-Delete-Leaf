@@ -25,9 +25,7 @@ pub(crate) fn increment_deletion_seq() -> u64 {
         let next = current
             .checked_add(1)
             .unwrap_or_else(|| ic_cdk::trap("MKTd02: deletion_seq overflow; cannot issue additional receipts"));
-        s.deletion_seq
-            .set(StorableU64(next))
-            .expect("MKTd02: failed to persist deletion_seq");
+        s.deletion_seq.set(StorableU64(next));
         next
     })
 }

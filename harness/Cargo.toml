@@ -15,8 +15,9 @@ crate-type = ["cdylib", "rlib"]
 mktd02 = { path = "../mktd02" }
 # Same source/pin as mktd02 so zombie-core types unify (single crate in graph).
 zombie-core = { git = "https://github.com/Together-Alone-Ventures/zombie-core", tag = "zombie-core-v0.3.1" }
-ic-cdk = "0.17"
-ic-stable-structures = "0.6"
+# v0.4.1 re-pin — keep in lockstep with mktd02 (shared engine source / graph).
+ic-cdk = "0.18"
+ic-stable-structures = "0.7"
 candid = "0.10"
 serde = { version = "1", features = ["derive"] }
 hex = "0.4"

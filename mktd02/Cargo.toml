@@ -12,8 +12,13 @@ repository.workspace = true
 # NAMING CONVENTION: always write "zombie-core vX.Y.Z" (repo-prefixed)
 # when referencing this dependency alongside MKTd02 version strings.
 zombie-core = { git = "https://github.com/Together-Alone-Ventures/zombie-core", tag = "zombie-core-v0.3.1" }
-ic-cdk = "0.17"
-ic-stable-structures = "0.6"
+# v0.4.1 re-pin: ic-cdk 0.17→0.18, ic-stable-structures 0.6→0.7 so hosts
+# (OpenChatZD, DaffyDefs) share one MemoryManager across the mktd02::init
+# boundary without the ic-cdk-executor `links` collision / is type mismatch.
+# Dependency-compatibility only — no API / receipt-schema / hash / stable-layout
+# change (see MKTd02_v0.4.1_RePin_Deliverable.md).
+ic-cdk = "0.18"
+ic-stable-structures = "0.7"
 candid = "0.10"
 serde = { version = "1", features = ["derive"] }
 ciborium = "0.2"

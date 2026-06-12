@@ -176,7 +176,10 @@ pub fn finalize_receipt(
     }
 
     // Guard 2: caller must be a controller.
-    let caller = ic_cdk::caller();
+    // ic-cdk 0.18: `ic_cdk::caller()` → `ic_cdk::api::msg_caller()` (same ic0
+    // msg_caller syscall); `is_controller` unchanged. Controller-guard behaviour
+    // and the NoPendingReceipt-before-NotController ordering are preserved.
+    let caller = ic_cdk::api::msg_caller();
     if !ic_cdk::api::is_controller(&caller) {
         return Err(FinalizationError::NotController);
     }
